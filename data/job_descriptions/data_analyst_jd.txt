@@ -1,0 +1,76 @@
+DATA ANALYST
+
+Company: Apex Analytics Solutions
+Department: Data & Business Intelligence
+Employment Type: Full-time
+Experience: 2-4 years
+Location: Bengaluru, India
+Work Mode: Hybrid
+
+ABOUT THE COMPANY
+
+Apex Analytics Solutions is a data and technology consulting company that helps organizations make informed business decisions through data engineering, business intelligence, and advanced analytics. The company works with clients across finance, retail, healthcare, and e-commerce.
+
+JOB OVERVIEW
+
+We are looking for a detail-oriented Data Analyst to collect, process, analyze, and interpret large datasets. The ideal candidate should be able to identify trends, patterns, and business opportunities using analytical tools and techniques. The candidate will work closely with business teams to convert complex data into meaningful insights and actionable recommendations.
+
+KEY RESPONSIBILITIES
+
+1. Collect, clean, validate, and transform structured and unstructured datasets from multiple sources.
+2. Perform exploratory data analysis to identify patterns, trends, anomalies, and correlations.
+3. Write optimized SQL queries using joins, subqueries, CTEs, and window functions.
+4. Develop interactive dashboards and reports using Power BI or Tableau.
+5. Use Python libraries such as Pandas and NumPy for data manipulation and analysis.
+6. Design, calculate, and monitor key performance indicators (KPIs).
+7. Perform statistical analysis and hypothesis testing to support business decisions.
+8. Collaborate with stakeholders to understand business requirements and analytical needs.
+9. Present findings through reports, dashboards, and presentations.
+10. Maintain data accuracy, documentation, and consistency across reporting systems.
+
+REQUIRED TECHNICAL SKILLS
+
+1. Strong knowledge of SQL and relational databases.
+2. Practical experience with Python, Pandas, and NumPy.
+3. Understanding of statistics, probability, and hypothesis testing.
+4. Experience with Power BI or Tableau.
+5. Knowledge of data cleaning and exploratory data analysis.
+6. Understanding of MySQL, PostgreSQL, or SQL Server.
+7. Advanced Excel skills, including Pivot Tables and lookup functions.
+
+PREFERRED SKILLS
+
+1. Familiarity with AWS, Microsoft Azure, or Google Cloud.
+2. Knowledge of Apache Spark and big data technologies.
+3. Understanding of ETL processes and data warehousing.
+4. Basic knowledge of Machine Learning.
+5. Experience with Git and REST APIs.
+
+EDUCATIONAL QUALIFICATIONS
+
+1. Bachelor's degree in Computer Science, Information Technology, Statistics, Mathematics, Data Science, or a related discipline.
+2. Master's degree in Data Science or Business Analytics is preferred.
+
+EXPERIENCE REQUIREMENTS
+
+2-4 years of professional experience in data analytics, business intelligence, or a related field.
+Experience working with real-world datasets and presenting analytical findings to stakeholders.
+
+SOFT SKILLS
+
+1. Strong analytical and problem-solving abilities.
+2. Effective verbal and written communication.
+3. Attention to detail and accuracy.
+4. Ability to work collaboratively in a team.
+5. Good time management and organizational skills.
+
+PERFORMANCE EXPECTATIONS
+
+1. Deliver accurate and reliable analytical reports.
+2. Complete assigned analytical tasks within agreed timelines.
+3. Identify opportunities to improve reporting and data processes.
+4. Communicate findings clearly to technical and non-technical stakeholders.
+
+KEYWORDS
+
+Data Analysis, SQL, Python, Pandas, NumPy, Power BI, Tableau, Statistics, Excel, Data Visualization, Data Cleaning, Exploratory Data Analysis, ETL, AWS, Azure, Apache Spark, Machine Learning, Data Warehousing.
