@@ -60,7 +60,7 @@ def _experience_score(resume,jd,semantic):
             duration["meets_minimum_requirement"]=candidate_years>=float(required)
             duration["candidate_experience"]["professional_experience_years"]=round(candidate_years,2)
     numeric=duration.get("experience_match_percentage")
-    semantic_score=semantic.get("experience_semantic_score") if semantic else None
+    semantic_score=(semantic.get("experience_semantic_score") if semantic and semantic.get("total_experience_evidence", 0) > 0 else None)
     if numeric is None and semantic_score is None: return None,duration
     if numeric is None: score=semantic_score
     elif semantic_score is None: score=numeric
