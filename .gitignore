@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+
+# Secrets and local config
+.env
+
+# Candidate data (personal information, never commit)
+data/resumes/*
+data/job_descriptions/*
+data/outputs/*
+!data/resumes/.gitkeep
+!data/job_descriptions/.gitkeep
+!data/outputs/.gitkeep
+
+# Model and OS caches
+.cache/
+.DS_Store

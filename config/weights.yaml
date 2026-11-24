@@ -1,0 +1,5 @@
+weights:
+  skills: 0.40
+  experience: 0.25
+  education: 0.15
+  projects: 0.20
