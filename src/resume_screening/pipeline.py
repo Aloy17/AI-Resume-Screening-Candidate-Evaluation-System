@@ -4,7 +4,7 @@ import json
 import re
 
 from src.resume_screening.extraction.text_extractor import extract_text_from_pdf
-from src.resume_screening.parsing.cleaner import clean_text
+from src.resume_screening.parsing.cleaner import clean_resume_text
 from src.resume_screening.parsing.info_extractor import extract_resume_information
 from src.resume_screening.parsing.jd_extractor import extract_job_description_information
 from src.resume_screening.matching.skills import evaluate_skill_match
@@ -33,12 +33,32 @@ def load_job_description(path):
     if path.suffix.lower()==".pdf": raw=extract_text_from_pdf(path)
     elif path.suffix.lower()==".txt": raw=path.read_text(encoding="utf-8")
     else: raise ValueError("Job descriptions must be .pdf or .txt files.")
-    raw=clean_text(raw)
+    raw=clean_resume_text(raw)
     if len(raw)<40: raise ValueError("Job description is empty or too short.")
     return raw,extract_job_description_information(raw)
 
 def _experience_score(resume,jd,semantic):
     duration=evaluate_experience_match(resume,jd)
+    # The current resume parser stores employment dates as a human-readable
+    # duration string; calculate_total_experience only consumes date fields.
+    # Derive a conservative numeric estimate from those duration strings.
+    entries=resume.get("experience") or []
+    parsed_years=[]
+    for entry in entries:
+        value=str(entry.get("duration") or "")
+        match=re.search(r"(\d+(?:\.\d+)?)\s*(years?|yrs?)",value,re.I)
+        if match:
+            years=float(match.group(1))
+            if "intern" not in str(entry.get("role") or "").lower():
+                parsed_years.append(years)
+    if parsed_years and duration.get("candidate_experience",{}).get("professional_experience_years",0)==0:
+        candidate_years=sum(parsed_years)
+        required=duration.get("required_experience",{}).get("minimum")
+        if required is not None:
+            numeric_estimate=100.0 if float(required)<=0 else min(candidate_years/float(required),1.0)*100
+            duration["experience_match_percentage"]=round(numeric_estimate,2)
+            duration["meets_minimum_requirement"]=candidate_years>=float(required)
+            duration["candidate_experience"]["professional_experience_years"]=round(candidate_years,2)
     numeric=duration.get("experience_match_percentage")
     semantic_score=semantic.get("experience_semantic_score") if semantic else None
     if numeric is None and semantic_score is None: return None,duration
@@ -53,7 +73,7 @@ def evaluate_candidate(pdf_path,jd_raw,jd,weights=None):
     path=Path(pdf_path)
     raw=extract_text_from_pdf(path)
     validate_resume_text(raw)
-    resume=extract_resume_information(clean_text(raw))
+    resume=extract_resume_information(clean_resume_text(raw))
     skills=evaluate_skill_match(resume,jd)
     education=evaluate_education_match(resume,jd)
     try: semantic=evaluate_semantic_match(resume,jd)
