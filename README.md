@@ -1,28 +1,72 @@
+
 # AI Resume Screening and Candidate Evaluation System
 
-Ranks multiple PDF resumes against a Job Description (JD) and shows a per category score breakdown for each candidate, so a recruiter can see why a candidate ranked where they did.
+A Python-based system that extracts information from PDF resumes, evaluates candidates against a job description, and produces a ranked list with category-wise scores.
+
+## Features
+
+- Extracts selectable text from PDF resumes and job descriptions using PyMuPDF.
+- Parses skills, experience, education and projects using rule-based extraction.
+- Generates semantic embeddings using Sentence Transformers.
+- Automatically caches embeddings and reuses them across ranking runs.
+- Scores candidates across four categories.
+- Calculates weighted suitability scores.
+- Ranks candidates deterministically.
 
 ## Pipeline
 
-PDF Resume → Text Extraction → Information Extraction → Structured JSON → Embeddings → Comparison with JD → Score Calculation → Candidate Ranking
+PDF Resumes + PDF Job Description
+→ Text Extraction
+→ Text Cleaning
+→ Information Extraction
+→ Embedding Generation and Cache Lookup
+→ Category-wise Matching
+→ Weighted Scoring
+→ Candidate Ranking
+→ JSON Output
 
-| Stage | Module | Tooling |
-| --- | --- | --- |
-| Resume upload | `resume_screening.cli`, `resume_screening.pipeline` | CLI for now |
-| Text extraction | `resume_screening.extraction` | PyMuPDF, Tesseract OCR fallback for scanned PDFs |
-| Information extraction | `resume_screening.parsing` | Cleaning plus section parsing into structured JSON |
-| Embeddings | `resume_screening.embeddings` | Sentence Transformers, all-MiniLM-L6-v2, per section |
-| Comparison with JD | `resume_screening.matching` | Skills, experience, education, projects |
-| Score calculation | `resume_screening.scoring` | Weighted sum of category scores |
-| Candidate ranking | `resume_screening.ranking` | Sort high to low, keep category scores |
+## Technology Stack
 
-Default weights live in `config/weights.yaml`: skills 40%, experience 25%, education 15%, projects 20%. They are initial values and can be adjusted.
+| Component | Technology |
+|---|---|
+| Language | Python 3.13 |
+| PDF extraction | PyMuPDF |
+| Information extraction | Python regex and rule-based parsing |
+| Embeddings | Sentence Transformers |
+| Embedding model | all-MiniLM-L6-v2 |
+| Numerical operations | NumPy |
+| Configuration | YAML |
+| Testing | pytest |
 
-Full detail is in `docs/pipeline.md`.
+## Evaluation Categories
 
-## Project layout
+| Category | Default Weight |
+|---|---:|
+| Skills | 40% |
+| Experience | 25% |
+| Education | 15% |
+| Projects | 20% |
 
-```
+Weights are configurable in `config/weights.yaml`. All weights must be non-negative and sum to 1.0.
+
+## Embedding Cache
+
+The system stores individual text embeddings in:
+
+`data/outputs/embedding_cache.json`
+
+When the ranking pipeline runs:
+
+1. It checks the cache for each requested text and embedding model.
+2. Existing embeddings are reused.
+3. Missing embeddings are generated and saved.
+4. Changed text or a different model produces a new cache entry.
+
+The cache is generated automatically. No separate embedding-generation command is required.
+
+## Project Structure
+
+```text
 .
 ├── config/
 │   └── weights.yaml
@@ -32,6 +76,8 @@ Full detail is in `docs/pipeline.md`.
 │   └── outputs/
 ├── docs/
 │   └── pipeline.md
+├── scripts/
+│   └── test_all_resumes.py
 ├── src/
 │   └── resume_screening/
 │       ├── cli.py
@@ -46,30 +92,63 @@ Full detail is in `docs/pipeline.md`.
 │       └── ranking/
 ├── tests/
 ├── pyproject.toml
-├── requirements.txt
-└── .env.example
+└── requirements.txt
 ```
 
 ## Setup
 
-Tesseract must be installed on the system for the OCR fallback.
+Create and activate a virtual environment:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
+```
+
+Install the project dependencies:
+
+```bash
 pip install -e ".[dev]"
-cp .env.example .env
-pytest
+```
+
+Run the test suite:
+
+```bash
+PYTHONPATH=src python3 -m pytest -v
 ```
 
 ## Usage
 
+Place PDF resumes in `data/resumes/` and PDF job descriptions in `data/job_descriptions/`.
+
+Run the ranking pipeline:
+
 ```bash
-resume-screening --resumes data/resumes --jd data/job_descriptions/jd.txt --output data/outputs/ranking.json
+PYTHONPATH=src python3 -m resume_screening.cli \
+  --resumes data/resumes \
+  --jd "data/job_descriptions/JD_Python_Dev.pdf" \
+  --output data/outputs/ranking.json
 ```
 
-## Status
+The output contains candidate rankings, final suitability scores and individual category scores.
 
-The structure, data models, config loading, score combination and ranking are implemented and tested. The extraction, parsing, embedding and matching stages are skeletons that raise `NotImplementedError` and are the next things to build.
+## Additional Utility
 
-Resumes contain personal information. Everything under `data/` is git ignored except the `.gitkeep` files.
+To export all resumes as structured JSON for inspection:
+
+```bash
+PYTHONPATH=src python3 scripts/test_all_resumes.py
+```
+
+## Current Limitations
+
+- Scanned/image-only PDFs are not supported.
+- Information extraction is rule-based and may miss information in unusual resume formats.
+- Suitability scores are heuristic estimates, not hiring decisions.
+- The system is currently a local CLI application.
+
+## Data Privacy
+
+Resume PDFs, job descriptions, generated outputs and embedding caches are stored locally. Files under `data/` are excluded from Git to avoid committing candidate information.
+```
+
+After saving, tell me. Then we'll update `docs/pipeline.md` to match this README and verify both documents against the actual implementation.

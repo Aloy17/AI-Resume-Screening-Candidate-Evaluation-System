@@ -22,3 +22,6 @@ data/outputs/*
 # Model and OS caches
 .cache/
 .DS_Store
+
+# Anonymized resume copies (local candidate data)
+data/anonymized_resumes/
