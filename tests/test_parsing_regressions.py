@@ -71,3 +71,38 @@ def test_projects_split_consecutive_headings_and_skip_proposed_work():
     assert entries[0].name == "WebShield – Website Security Checker"
     assert entries[1].name == "The Cyber Minds – Cybersecurity Awareness Initiative"
     assert all("Password Strength Analyzer" not in item.name for item in entries)
+
+
+CANDIDATE_17_EDUCATION = """ITM Skills University - MCA\u200b
+\u200b
+\u200b
+\u200b
+\u200b
+\u200b
+Pursuing
+Bachelor of Computer Science 2026
+INTERESTS
+Full-Stack Web Development
+"""
+
+
+def test_experience_ignores_invisible_only_lines_between_company_and_role():
+    text = CANDIDATE_17_EXPERIENCE.replace(
+        "Hari Om Thalassic Pvt. Ltd.\\n",
+        "Hari Om Thalassic Pvt. Ltd.\\n" + "\\u200b\\n" * 7,
+    )
+    entries = _extract_experience(text)
+    assert len(entries) == 1
+    assert entries[0].company == "Hari Om Thalassic Pvt. Ltd."
+    assert entries[0].title == "Full-Stack Developer Intern"
+
+
+def test_education_parses_institution_first_mca_and_degree_without_institution():
+    entries = _extract_education(CANDIDATE_17_EDUCATION)
+    assert len(entries) == 2
+    assert entries[0].degree == "MCA"
+    assert entries[0].institution == "ITM Skills University"
+    assert entries[0].year is None
+    assert entries[1].degree == "Bachelor of Computer Science"
+    assert entries[1].institution == ""
+    assert entries[1].year == 2026
