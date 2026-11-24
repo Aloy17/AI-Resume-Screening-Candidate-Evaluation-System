@@ -1,0 +1,25 @@
+profiles:
+  software_development:
+    skills: 0.25
+    experience: 0.15
+    education: 0.20
+    projects: 0.30
+    certifications: 0.10
+  cloud_devops:
+    skills: 0.20
+    experience: 0.30
+    education: 0.10
+    projects: 0.10
+    certifications: 0.30
+  cybersecurity:
+    skills: 0.20
+    experience: 0.30
+    education: 0.10
+    projects: 0.10
+    certifications: 0.30
+  default:
+    skills: 0.30
+    experience: 0.25
+    education: 0.15
+    projects: 0.20
+    certifications: 0.10
