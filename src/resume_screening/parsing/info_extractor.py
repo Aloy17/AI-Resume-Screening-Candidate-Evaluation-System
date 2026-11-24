@@ -452,6 +452,12 @@ def _get_total_experience_months(text: str) -> int:
 def _extract_experience(text: str) -> list[ExperienceEntry]:
     """Extract experience entries from compact and whitespace-heavy layouts."""
 
+    # PDF extraction can leave zero-width characters on otherwise blank lines.
+    # Remove them before splitting blocks so a company name remains the
+    # immediately preceding block of its role instead of being separated
+    # by invisible-only blocks.
+    text = _clean_invisible_characters(text)
+
     entries = []
     blocks = _split_blocks(text)
 
@@ -593,6 +599,10 @@ def _get_field_of_study(degree: str) -> str:
 
 def _extract_education(text: str) -> list[EducationEntry]:
     """Extract education records from degree-first and institution-first layouts."""
+
+    # Normalize invisible PDF formatting characters before parsing degree
+    # names and institution text.
+    text = _clean_invisible_characters(text)
 
     entries = []
     lines = [line.strip() for line in text.splitlines() if line.strip()]
