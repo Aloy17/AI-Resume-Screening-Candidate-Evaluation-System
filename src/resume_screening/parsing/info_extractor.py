@@ -612,17 +612,23 @@ def _extract_education(text: str) -> list[EducationEntry]:
                 for part in re.split(r"\s+[–—-]\s+", line)
             ]
 
+        # Match degree names only at the beginning of a segment.
+        # Searching anywhere would misread ordinary words such as "be"
+        # in "Deemed to be University" as the abbreviation "B.E.".
         degree_part = next(
-            (part for part in parts if DEGREE_PATTERN.search(part)),
-            line,
+            (part for part in parts if DEGREE_PATTERN.match(part)),
+            None,
         )
+        if degree_part is None:
+            degree_part = line
+
         degree = YEAR_PATTERN.sub("", degree_part).strip(" |,–—-")
         institution_parts = [
             part for part in parts
             if part != degree_part
             and not YEAR_PATTERN.search(part)
             and not re.fullmatch(r"(?i)pursuing|present|current", part.strip())
-            and not DEGREE_PATTERN.search(part)
+            and not DEGREE_PATTERN.match(part)
         ]
         institution = " ".join(
             part.strip(" ,") for part in institution_parts
