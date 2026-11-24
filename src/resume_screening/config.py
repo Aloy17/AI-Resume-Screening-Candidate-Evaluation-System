@@ -1,4 +1,3 @@
-
 """Configuration: scoring weights and runtime settings."""
 
 from __future__ import annotations
@@ -108,7 +107,3 @@ def load_weights(
 
 def embedding_model_name() -> str:
     return os.environ.get("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
-
-
-def tesseract_cmd() -> str | None:
-    return os.environ.get("TESSERACT_CMD") or None

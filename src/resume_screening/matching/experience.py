@@ -61,10 +61,26 @@ def _score_responsibilities(
     jd_embeddings = embedder.embed(jd_responsibilities)
 
     similarities = jd_embeddings @ candidate_embeddings.T
-    best_matches = similarities.max(axis=1)
 
-    score = max(0.0, float(best_matches.mean())) * 100
+    # Assign each candidate responsibility at most once.
+    pairs = []
+    for jd_index, row in enumerate(similarities):
+        for candidate_index, similarity in enumerate(row):
+            pairs.append((float(similarity), jd_index, candidate_index))
 
+    pairs.sort(reverse=True)
+    matched_jd = set()
+    matched_candidates = set()
+    total = 0.0
+
+    for similarity, jd_index, candidate_index in pairs:
+        if jd_index in matched_jd or candidate_index in matched_candidates:
+            continue
+        matched_jd.add(jd_index)
+        matched_candidates.add(candidate_index)
+        total += max(0.0, min(1.0, similarity))
+
+    score = (total / len(jd_responsibilities)) * 100
     return min(100.0, score)
 
 

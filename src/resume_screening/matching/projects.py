@@ -11,6 +11,7 @@ from ..models import JobDescription, ResumeData
 
 DESCRIPTION_WEIGHT = 0.70
 TECHNOLOGY_WEIGHT = 0.30
+DESCRIPTION_SIMILARITY_THRESHOLD = 0.65
 
 
 def _normalize(value: str) -> str:
@@ -37,13 +38,9 @@ def _score_descriptions(
 
     for requirement_index, row in enumerate(similarities):
         for project_index, similarity in enumerate(row):
-            pairs.append(
-                (
-                    max(0.0, min(1.0, float(similarity))),
-                    requirement_index,
-                    project_index,
-                )
-            )
+            score = max(0.0, min(1.0, float(similarity)))
+            if score >= DESCRIPTION_SIMILARITY_THRESHOLD:
+                pairs.append((score, requirement_index, project_index))
 
     pairs.sort(reverse=True)
 

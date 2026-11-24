@@ -1,161 +1,152 @@
+# Pipeline and Scoring Details
 
-# Resume Screening and Candidate Evaluation Pipeline
+## 1. Inputs and execution
 
-## 1. Input
+The application processes multiple resume PDFs from one directory and one PDF job description.
 
-The system accepts:
+- The interactive CLI searches for job descriptions in `data/job_descriptions/`.
+- Its default resume directory is `data/anonymized_resumes/`.
+- The resume directory can be overridden with `--resumes`.
+- A job description can be selected interactively or supplied with `--jd`.
 
-- Multiple PDF resumes from a directory.
-- One PDF job description.
+The application runs locally through `python3 main.py` or the installed `resume-screening` command.
 
-The CLI validates the input paths and processes PDF files.
+## 2. PDF text extraction
 
-## 2. Text Extraction
+PyMuPDF extracts selectable text from each PDF. The extractor raises an error when a PDF is missing, is not a PDF, or contains no extractable text.
 
-PyMuPDF extracts selectable text from each PDF.
+OCR is not implemented. Scanned/image-only PDFs are therefore unsupported.
 
-The current implementation does not perform OCR. Scanned PDFs or PDFs without extractable text are unsupported and produce an extraction error.
+## 3. Text cleaning
 
-## 3. Text Cleaning
+Extracted text is normalized before parsing. Cleaning includes Unicode normalization, line-ending normalization, joining words split by line-break hyphens, removing control and invisible formatting characters, and normalizing whitespace.
 
-Extracted text is normalized before parsing. Cleaning includes:
+## 4. Rule-based information extraction
 
-- Normalizing Unicode characters.
-- Standardizing line endings.
-- Rejoining words split across lines by hyphens.
-- Removing control characters.
-- Normalizing whitespace and blank lines.
+The parser uses Python code, regular expressions, section headings and keyword aliases. It does not use an LLM.
 
-## 4. Information Extraction
+### Resume fields
 
-The rule-based parser converts the cleaned text into structured data.
-
-### Resume information
-
-- Candidate identifier and source filename.
-- Technical skills.
-- Work experience, including job titles, companies, durations and responsibilities.
-- Education, including degrees, fields of study, institutions and years.
-- Projects, including names, descriptions and technologies.
+- Candidate ID and source filename.
+- Skills.
+- Work experience: title, company, duration and responsibilities.
+- Education: degree, field of study, institution and year.
+- Projects: name, description and detected technologies.
 - Total estimated experience in years.
 
-### Job description information
+### Job-description fields
 
 - Job title.
 - Required and preferred skills.
 - Minimum and maximum experience.
 - Required and preferred education.
-- Responsibilities.
-- Project requirements.
+- Responsibilities and explicit project requirements.
 - Required and preferred certifications.
 - Evaluation emphasis.
 
-The parser uses Python rules, regular expressions and keyword matching. It does not use an LLM.
+Extracting a field does not necessarily mean it participates in scoring. Certifications and evaluation emphasis are currently parsed but are not scoring categories.
 
-## 5. Embedding Generation and Caching
+## 5. Embeddings and cache
 
-The system uses the Sentence Transformers model `all-MiniLM-L6-v2` to convert text into numerical embeddings.
-
-Embeddings are generated for the text used by the matching components, such as skills, responsibilities and project descriptions.
-
-### Cache behaviour
+The default Sentence Transformers model is `all-MiniLM-L6-v2`.
 
 The embedding cache is stored at:
 
 `data/outputs/embedding_cache.json`
 
-Each cache key is calculated using the embedding model name and input text. This means:
+Each cache key is derived from the model name and exact input text. Cached vectors are reused when both match; missing vectors are generated, normalized and persisted.
 
-1. The system checks whether an embedding for the exact text and model already exists.
-2. If it exists, the cached vector is reused.
-3. If it does not exist, the model generates the embedding.
-4. The new embedding is normalized and saved to the cache.
+The cache stores embeddings only. PDF extraction and parsing still happen on each pipeline run.
 
-The cache is persistent across ranking runs. Changing the input text or embedding model results in a different cache key.
+## 6. Category matching
 
-**Important:** The cache stores embeddings, not parsed resume or job description data. PDFs are still extracted and parsed whenever the ranking pipeline runs.
-
-## 6. Candidate Matching
-
-Each candidate is evaluated across four categories.
+Every candidate receives four category scores from 0 to 100.
 
 ### Skills
 
-Required and preferred skills are compared using exact matching and semantic similarity.
-
-The best candidate skill match is considered for each target skill. Semantic similarity uses cosine similarity, with a threshold of 0.75.
-
-Required and preferred skill scores are combined using an 80:20 weighting.
+- Exact normalized matches are assigned first.
+- Remaining skills are compared by cosine similarity.
+- Semantic matches must meet a threshold of 0.75.
+- Matching is one-to-one: a candidate skill cannot satisfy multiple target skills within the same group.
+- When both required and preferred skills exist, their scores are combined 80:20. If only one group exists, that group supplies the score.
+- If the job description contains no required or preferred skills, the score is 0.
 
 ### Experience
 
-Experience evaluation combines:
+The years component compares the candidate's total estimated experience with the JD's minimum requirement.
 
-- A numerical comparison of the candidate's total experience against the job's minimum requirement.
-- Semantic similarity between the candidate's responsibilities and the job description's responsibilities.
+- If the candidate is below the minimum, the score is proportional to candidate years divided by required minimum years.
+- Meeting or exceeding the minimum produces 100; exceeding the maximum is not penalized.
+- If both minimum and maximum are absent, the years score is 100.
+- A minimum of zero does not impose a positive experience threshold.
 
-The two components use a 70:30 weighting.
+When both candidate responsibilities and JD responsibilities are available, they are semantically compared with one-to-one assignment. The years and responsibility components are combined 70:30. If either side has no responsibility evidence, only the years score is used.
 
 ### Education
 
-Education is evaluated using rule-based comparisons of degree levels and fields of study against the required and preferred qualifications.
-
-Required and preferred education scores use an 80:20 weighting.
+Education is compared using rule-based degree levels and field-of-study aliases. Required and preferred qualification scores are combined 80:20 when both are present. If only one is present, only that requirement is scored. If the JD specifies neither, the education score is 100.
 
 ### Projects
 
-Project descriptions and technologies are compared against the job description's project requirements or responsibilities.
+Project descriptions are compared only with explicit JD project requirements—not the general responsibilities section.
 
-The project score combines semantic description similarity and technology overlap using a 70:30 weighting.
+- Description similarity uses cosine similarity and a threshold of 0.65.
+- Each project and each project requirement can be used in at most one description match.
+- Technology overlap is an exact normalized comparison between detected project technologies and the JD's required and preferred skills.
+- Description and technology scores are combined 70:30 when both are available. If only one component has usable evidence, the available component is used.
+- A resume with no parsed projects receives 0.
 
-## 7. Weighted Scoring
+## 7. Weighted final score
 
-Each matching category produces a score between 0 and 100.
+The four category scores are combined using a weight profile from `config/weights.yaml`. Weights must be non-negative and sum to 1.0.
 
-The final suitability score is calculated using configurable weights.
+### Default weights
 
-| Category | Default Weight |
+| Category | Weight |
 |---|---:|
 | Skills | 40% |
 | Experience | 25% |
 | Education | 15% |
 | Projects | 20% |
 
-Weights are configured in `config/weights.yaml`. They must be non-negative and sum to 1.0.
+### Job-specific profiles
 
-The final score is the weighted sum of the four category scores.
+| Profile | Skills | Experience | Education | Projects |
+|---|---:|---:|---:|---:|
+| Python Developer | 40% | 25% | 10% | 25% |
+| Cybersecurity Specialist | 35% | 30% | 10% | 25% |
+| DevOps Engineer | 35% | 30% | 10% | 25% |
+| Mobile Application Developer | 40% | 20% | 10% | 30% |
 
-## 8. Candidate Ranking
+A profile is selected by normalizing the job-description filename stem and matching it to a profile key. If no profile matches, default weights are used.
 
-Candidates are sorted by:
+The final score is the weighted sum of skills, experience, education and project scores.
 
-1. Final suitability score, descending.
-2. Skills score, descending, when final scores are tied.
-3. Candidate ID, ascending, when both scores are tied.
+## 8. Ranking
 
-Each candidate receives a sequential rank.
+Candidates are ordered by:
+
+1. Final score, descending.
+2. Skills score, descending, to break final-score ties.
+3. Candidate ID, ascending, to break remaining ties.
+
+Ranks are assigned sequentially after sorting.
 
 ## 9. Output
 
-The CLI exports the ranked candidates as JSON.
+By default, the CLI displays a terminal table with rank, candidate ID, final score and all four category scores.
 
-The output includes:
+When `--output` is supplied, the same ranked results are written as JSON. The JSON includes candidate ID, source filename, category scores, final score and rank.
 
-- Candidate identifier.
-- Original resume filename.
-- Individual category scores.
-- Final suitability score.
-- Candidate rank.
+## 10. Parsing diagnostic utility
 
-## 10. Diagnostic Utility
+`scripts/test_all_resumes.py` extracts and parses every PDF in a selected resume directory and writes structured JSON for inspection. It does not run matching, scoring or ranking.
 
-`scripts/test_all_resumes.py` can process all resume PDFs and export structured parsing results for inspection.
+## 11. Limitations and interpretation
 
-This utility is intended for diagnosing extraction and parsing quality. It is separate from the main ranking pipeline.
-
-## Implementation Limitations
-
-- Scanned or image-only PDFs are not supported because OCR is not implemented.
-- Rule-based extraction may miss information in unusual resume formats.
-- Embedding caching avoids regenerating unchanged vectors, but does not eliminate PDF extraction or parsing on subsequent runs.
-- Scores are heuristic indicators of candidate suitability and should not be treated as automated hiring decisions.
+- OCR is not available; PDFs need selectable text.
+- Rule-based parsing is sensitive to resume and JD wording and layout.
+- Parsed certifications are not currently scored.
+- Scoring weights and thresholds are heuristic and have not been empirically validated against hiring outcomes.
+- A high suitability score is not a probability of being hired and must not be treated as an automated hiring decision.
+- Renaming PDF files does not remove names or other personal information from document contents or metadata.

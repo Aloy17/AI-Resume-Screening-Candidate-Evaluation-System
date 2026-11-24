@@ -450,62 +450,75 @@ def _get_total_experience_months(text: str) -> int:
 # --------------------------------------------------
 
 def _extract_experience(text: str) -> list[ExperienceEntry]:
-    """Extract experience entries and reconstruct wrapped responsibilities."""
+    """Extract experience entries from compact and whitespace-heavy layouts."""
+
+    # PDF extraction can leave zero-width characters on otherwise blank lines.
+    # Remove them before splitting blocks so a company name remains the
+    # immediately preceding block of its role instead of being separated
+    # by invisible-only blocks.
+    text = _clean_invisible_characters(text)
 
     entries = []
+    blocks = _split_blocks(text)
 
-    for block in _split_blocks(text):
-        lines = [
-            line.strip()
-            for line in block.splitlines()
-            if line.strip()
-        ]
-
-        if not lines:
+    for block_index, block in enumerate(blocks):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        date_location = None
+        for line_index, line in enumerate(lines):
+            match = DATE_PATTERN.search(line)
+            if match:
+                date_location = (line_index, match)
+                break
+        if date_location is None:
             continue
 
-        date_index = next(
-            (
-                index
-                for index, line in enumerate(lines)
-                if DATE_PATTERN.search(line)
-            ),
-            None,
-        )
+        date_index, date_match = date_location
+        before_date = lines[:date_index]
+        after_date = lines[date_index + 1:]
+        inline_prefix = lines[date_index][:date_match.start()].strip()
+        inline_suffix = lines[date_index][date_match.end():].strip()
 
-        if date_index is None:
-            continue
-
-        details_before_date = lines[:date_index]
-        details_after_date = lines[date_index + 1:]
-
-        if not details_before_date:
-            continue
-
-        title = _clean_bullet(details_before_date[-1])
-        company = _clean_bullet(details_before_date[0])
-
+        company = ""
+        title = ""
         responsibilities = []
 
-        for line in details_after_date:
-            if re.match(r"^\s*[•●▪◦*+\-]\s*", line):
-                responsibilities.append(_clean_bullet(line))
+        if len(before_date) >= 2:
+            company = _clean_bullet(before_date[0])
+            title = _clean_bullet(before_date[1])
+            responsibilities.extend(_clean_bullet(line) for line in before_date[2:])
+        elif len(before_date) == 1:
+            title = _clean_bullet(before_date[0])
+            if block_index > 0:
+                previous_lines = [
+                    line.strip()
+                    for line in blocks[block_index - 1].splitlines()
+                    if line.strip()
+                ]
+                if len(previous_lines) == 1:
+                    company = _clean_bullet(previous_lines[0])
 
-            elif responsibilities:
-                responsibilities[-1] += " " + line.strip()
+        if inline_prefix and inline_prefix != title:
+            responsibilities.append(_clean_bullet(inline_prefix))
+        if inline_suffix:
+            responsibilities.append(_clean_bullet(inline_suffix))
+        responsibilities.extend(
+            _clean_bullet(line) for line in after_date if _clean_bullet(line)
+        )
+        responsibilities = list(dict.fromkeys(
+            item for item in responsibilities if item
+        ))
 
         entries.append(
             ExperienceEntry(
                 title=title,
                 company=company,
-                duration_months=_get_duration_months(
-                    lines[date_index]
-                ),
+                duration_months=_get_duration_months(lines[date_index]),
                 responsibilities=responsibilities,
             )
         )
 
     return entries
+
 
 
 # --------------------------------------------------
@@ -585,47 +598,76 @@ def _get_field_of_study(degree: str) -> str:
 
 
 def _extract_education(text: str) -> list[EducationEntry]:
-    """Extract education entries from institution-first resume layouts."""
+    """Extract education records from degree-first and institution-first layouts."""
+
+    # Normalize invisible PDF formatting characters before parsing degree
+    # names and institution text.
+    text = _clean_invisible_characters(text)
 
     entries = []
-    lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip()
-    ]
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    stop_headings = {
+        "interest", "interests", "language", "languages",
+        "skills", "projects", "certifications", "achievements",
+    }
 
     for index, line in enumerate(lines):
-        if not INSTITUTION_PATTERN.search(line):
+        if not DEGREE_PATTERN.search(line):
             continue
 
-        parts = re.split(r"\s+[–—-]\s+", line)
+        parts = [part.strip(" []") for part in re.split(r"\s*\|\s*", line)]
+        if len(parts) == 1:
+            parts = [
+                part.strip()
+                for part in re.split(r"\s+[–—-]\s+", line)
+            ]
 
-        institution = parts[0].strip("[] ,")
-        degree = ""
+        # Match degree names only at the beginning of a segment.
+        # Searching anywhere would misread ordinary words such as "be"
+        # in "Deemed to be University" as the abbreviation "B.E.".
+        degree_part = next(
+            (part for part in parts if DEGREE_PATTERN.match(part)),
+            None,
+        )
+        if degree_part is None:
+            degree_part = line
 
-        for part in parts[1:]:
-            if DEGREE_PATTERN.search(part):
-                degree = part.strip()
-                break
+        degree = YEAR_PATTERN.sub("", degree_part).strip(" |,–—-")
+        institution_parts = [
+            part for part in parts
+            if part != degree_part
+            and not YEAR_PATTERN.search(part)
+            and not re.fullmatch(r"(?i)pursuing|present|current", part.strip())
+            and not DEGREE_PATTERN.match(part)
+        ]
+        institution = " ".join(
+            part.strip(" ,") for part in institution_parts
+        ).strip()
 
-        following_lines = lines[index + 1:index + 5]
+        years = YEAR_PATTERN.findall(line)
+        year = int(years[-1]) if years else None
 
-        for candidate in following_lines:
-            if DEGREE_PATTERN.search(candidate):
-                degree = candidate.strip("[] ")
-                break
+        if institution and re.search(r"\b(of|at|in|the)$", institution, re.IGNORECASE):
+            for following in lines[index + 1:]:
+                normalized = _normalize_heading(following)
+                if normalized in stop_headings or DEGREE_PATTERN.search(following):
+                    break
+                following_years = YEAR_PATTERN.findall(following)
+                continuation = YEAR_PATTERN.sub("", following).strip(" |,–—-")
+                if continuation and not re.fullmatch(
+                    r"(?i)pursuing|present|current", continuation
+                ):
+                    institution = f"{institution} {continuation}".strip()
+                if following_years:
+                    year = int(following_years[-1])
+                    break
 
-        if not degree:
+        identity = (degree.lower(), institution.lower(), year)
+        if any(
+            (item.degree.lower(), item.institution.lower(), item.year) == identity
+            for item in entries
+        ):
             continue
-
-        year = 0
-
-        for candidate in following_lines:
-            years = YEAR_PATTERN.findall(candidate)
-
-            if years:
-                year = int(years[-1])
-                break
 
         entries.append(
             EducationEntry(
@@ -639,53 +681,64 @@ def _extract_education(text: str) -> list[EducationEntry]:
     return entries
 
 
+
 # --------------------------------------------------
 # 6. Project extraction
 # --------------------------------------------------
 
 def _extract_projects(text: str) -> list[ProjectEntry]:
-    """Extract project names, descriptions and technologies."""
+    """Extract projects even when PDF text has no blank lines between them."""
 
     entries = []
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    heading_pattern = re.compile(r"^.{2,90}\s+[–—]\s+.{2,90}$")
+    heading_indexes = [
+        index for index, line in enumerate(lines)
+        if heading_pattern.match(line)
+    ]
 
-    for block in _split_blocks(text):
-        lines = [
-            line.strip()
-            for line in block.splitlines()
-            if line.strip()
+    if heading_indexes:
+        segments = []
+        for position, start in enumerate(heading_indexes):
+            end = heading_indexes[position + 1] if position + 1 < len(heading_indexes) else len(lines)
+            segments.append(lines[start:end])
+    else:
+        segments = [
+            [line.strip() for line in block.splitlines() if line.strip()]
+            for block in _split_blocks(text)
         ]
 
-        if not lines:
-            continue
+    excluded_status = re.compile(
+        r"\b(proposed|suggested project|practice project|not yet implemented|"
+        r"include as completed only after implementation)\b",
+        re.IGNORECASE,
+    )
 
-        name = _clean_bullet(lines[0])
+    for segment in segments:
+        if not segment:
+            continue
+        name = _clean_bullet(segment[0])
+        remaining = segment[1:]
+        if excluded_status.search(" ".join(remaining)) or excluded_status.search(name):
+            continue
 
         description_lines = []
         metadata_lines = []
-
-        for line in lines[1:]:
+        for line in remaining:
             if DATE_PATTERN.search(line):
                 continue
-
-            if "|" in line:
+            if re.match(r"(?i)^(technologies|technology|tech stack|tools|focus|status)\s*:", line):
                 metadata_lines.append(line)
                 continue
-
-            if re.search(
-                r"\bhttps?://|\b[\w-]+\.vercel\.app\b",
-                line,
+            if "|" in line or re.search(
+                r"\bhttps?://|\b[\w-]+\.vercel\.app\b", line
             ):
                 metadata_lines.append(line)
                 continue
-
             description_lines.append(_clean_bullet(line))
 
         description = " ".join(description_lines)
-
-        technology_text = " ".join(
-            metadata_lines + description_lines
-        )
-
+        technology_text = " ".join(metadata_lines + description_lines)
         entries.append(
             ProjectEntry(
                 name=name,
@@ -695,6 +748,7 @@ def _extract_projects(text: str) -> list[ProjectEntry]:
         )
 
     return entries
+
 
 
 # --------------------------------------------------

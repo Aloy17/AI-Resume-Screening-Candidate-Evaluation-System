@@ -6,7 +6,7 @@ default:
   projects: 0.20
 
 profiles:
-  jd_python_dev:
+  job_description_python_developer:
     skills: 0.40
     experience: 0.25
     education: 0.10

@@ -16,7 +16,7 @@ default:
   projects: 0.20
 
 profiles:
-  jd_python_dev:
+  job_description_python_developer:
     skills: 0.40
     experience: 0.25
     education: 0.10
@@ -42,7 +42,7 @@ def test_load_default_weights(weights_file):
 def test_load_python_profile(weights_file):
     weights = load_weights(
         weights_file,
-        "JD_Python_Dev.pdf",
+        "Job Description - Python Developer.pdf",
     )
 
     assert weights == Weights(
