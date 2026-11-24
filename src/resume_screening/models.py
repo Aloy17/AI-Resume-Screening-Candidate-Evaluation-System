@@ -48,13 +48,37 @@ class ResumeData:
         return asdict(self)
 
 
+
 @dataclass
 class JobDescription:
+    """Structured JSON form of a parsed job description."""
+
     title: str = ""
+
+    # Skills
     required_skills: list[str] = field(default_factory=list)
+    preferred_skills: list[str] = field(default_factory=list)
+
+    # Experience
     min_experience_years: float = 0.0
+    max_experience_years: float | None = None
+
+    # Education
     required_education: str = ""
+    preferred_education: str = ""
+
+    # Job requirements
     responsibilities: list[str] = field(default_factory=list)
+    project_requirements: list[str] = field(default_factory=list)
+
+    # Certifications
+    required_certifications: list[str] = field(default_factory=list)
+    preferred_certifications: list[str] = field(default_factory=list)
+
+    # Recruiter evaluation priorities
+    evaluation_emphasis: list[str] = field(default_factory=list)
+
+    # Original extracted text
     raw_text: str = ""
 
 
