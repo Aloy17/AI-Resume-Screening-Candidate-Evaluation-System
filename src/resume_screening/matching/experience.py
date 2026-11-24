@@ -27,16 +27,9 @@ def _score_years(resume: ResumeData, jd: JobDescription) -> float:
         return 100.0
 
     if candidate_years < minimum:
-        if minimum == 0:
-            return 100.0
-
         return round((candidate_years / minimum) * 100, 2)
 
-    if maximum is not None and candidate_years > maximum:
-        # Experience above the preferred range is not automatically
-        # treated as a disadvantage.
-        return 100.0
-
+    # Experience above the preferred range is not automatically penalized.
     return 100.0
 
 
@@ -44,8 +37,8 @@ def _score_responsibilities(
     resume: ResumeData,
     jd: JobDescription,
     embedder: Embedder,
-) -> float:
-    """Measure similarity between past and required responsibilities."""
+) -> float | None:
+    """Score responsibilities when both sides contain usable evidence."""
 
     candidate_responsibilities = [
         responsibility.strip()
@@ -60,22 +53,16 @@ def _score_responsibilities(
         if responsibility.strip()
     ]
 
-    if not jd_responsibilities:
-        return 0.0
-
-    if not candidate_responsibilities:
-        return 0.0
+    # Missing extraction is unknown evidence, not a zero match.
+    if not candidate_responsibilities or not jd_responsibilities:
+        return None
 
     candidate_embeddings = embedder.embed(candidate_responsibilities)
     jd_embeddings = embedder.embed(jd_responsibilities)
 
     similarities = jd_embeddings @ candidate_embeddings.T
-
-    # Each JD responsibility is matched against the candidate's
-    # most similar past responsibility.
     best_matches = similarities.max(axis=1)
 
-    # Ignore negative similarity and convert the average to a percentage.
     score = max(0.0, float(best_matches.mean())) * 100
 
     return min(100.0, score)
@@ -96,11 +83,8 @@ def score_experience(
         embedder,
     )
 
-    if not jd.responsibilities:
+    if responsibility_score is None:
         return round(years_score, 2)
-
-    if not resume.experience:
-        return round(years_score * YEARS_WEIGHT, 2)
 
     final_score = (
         years_score * YEARS_WEIGHT

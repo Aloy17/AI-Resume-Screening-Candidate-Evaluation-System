@@ -1,5 +1,5 @@
 
-"""Stage 5a: Skills matching using exact and semantic similarity."""
+"""Stage 5a: Skills matching using exact and one-to-one semantic similarity."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from ..models import JobDescription, ResumeData
 
 REQUIRED_WEIGHT = 0.80
 PREFERRED_WEIGHT = 0.20
-
 SEMANTIC_THRESHOLD = 0.75
 
 
@@ -25,65 +24,86 @@ def _score_skill_group(
     target_skills: list[str],
     embedder: Embedder,
 ) -> float:
-    """Score one group of JD skills against candidate skills."""
+    """Score JD skills while allowing each candidate skill one match."""
 
-    if not target_skills:
-        return 0.0
-
-    if not candidate_skills:
-        return 0.0
-
-    candidate_skills = sorted({
+    candidates = sorted({
         _normalize_skill(skill)
         for skill in candidate_skills
         if skill.strip()
     })
-
-    target_skills = sorted({
+    targets = sorted({
         _normalize_skill(skill)
         for skill in target_skills
         if skill.strip()
     })
 
-    if not candidate_skills:
+    if not targets or not candidates:
         return 0.0
 
-    candidate_set = set(candidate_skills)
+    candidate_indices = {
+        skill: index for index, skill in enumerate(candidates)
+    }
 
-    # Exact matches receive full credit.
+    # Exact matches take priority and reserve their candidate skills.
+    exact_matches = set(candidates) & set(targets)
+    matched_targets = set(exact_matches)
+    matched_candidates = {
+        candidate_indices[skill] for skill in exact_matches
+    }
+
+    total_score = float(len(exact_matches))
     unmatched_targets = [
-        skill
-        for skill in target_skills
-        if skill not in candidate_set
+        skill for skill in targets if skill not in matched_targets
+    ]
+    available_candidates = [
+        (index, skill)
+        for index, skill in enumerate(candidates)
+        if index not in matched_candidates
     ]
 
-    exact_matches = len(target_skills) - len(unmatched_targets)
+    if unmatched_targets and available_candidates:
+        candidate_texts = [
+            skill for _, skill in available_candidates
+        ]
 
-    if not unmatched_targets:
-        return 100.0
+        candidate_embeddings = embedder.embed(candidate_texts)
+        target_embeddings = embedder.embed(unmatched_targets)
 
-    # Compare remaining JD skills semantically.
-    candidate_embeddings = embedder.embed(candidate_skills)
-    target_embeddings = embedder.embed(unmatched_targets)
+        similarities = target_embeddings @ candidate_embeddings.T
 
-    similarities = np.matmul(
-        target_embeddings,
-        candidate_embeddings.T,
-    )
+        # Build all eligible pairs, then assign the strongest pairs first.
+        pairs = []
 
-    semantic_scores = []
+        for target_index, row in enumerate(similarities):
+            for candidate_index, similarity in enumerate(row):
+                score = float(similarity)
 
-    for row in similarities:
-        best_similarity = float(np.max(row))
+                if score >= SEMANTIC_THRESHOLD:
+                    pairs.append(
+                        (
+                            score,
+                            target_index,
+                            candidate_index,
+                        )
+                    )
 
-        if best_similarity >= SEMANTIC_THRESHOLD:
-            semantic_scores.append(best_similarity)
-        else:
-            semantic_scores.append(0.0)
+        pairs.sort(reverse=True)
 
-    total_score = exact_matches + sum(semantic_scores)
+        assigned_targets = set()
+        assigned_candidates = set()
 
-    return (total_score / len(target_skills)) * 100
+        for score, target_index, candidate_index in pairs:
+            if target_index in assigned_targets:
+                continue
+
+            if candidate_index in assigned_candidates:
+                continue
+
+            total_score += min(score, 1.0)
+            assigned_targets.add(target_index)
+            assigned_candidates.add(candidate_index)
+
+    return (total_score / len(targets)) * 100
 
 
 def score_skills(

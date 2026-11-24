@@ -138,7 +138,10 @@ def display_ranking(results: list) -> None:
         ])
 
     widths = [
-        max(len(headers[i]), max(len(row[i]) for row in rows))
+        max(
+            len(headers[i]),
+            max(len(row[i]) for row in rows),
+        )
         for i in range(len(headers))
     ]
 
@@ -193,7 +196,11 @@ def main(argv: list[str] | None = None) -> int:
         results = run_pipeline(
             args.resumes,
             str(jd_path),
-            weights=load_weights(args.weights),
+            weights=(
+                load_weights(args.weights, jd_path)
+                if args.weights
+                else None
+            ),
         )
 
         if args.output:

@@ -1,5 +1,31 @@
-weights:
+
+default:
   skills: 0.40
   experience: 0.25
   education: 0.15
   projects: 0.20
+
+profiles:
+  jd_python_dev:
+    skills: 0.40
+    experience: 0.25
+    education: 0.10
+    projects: 0.25
+
+  job_description_cybersecurity_specialist:
+    skills: 0.35
+    experience: 0.30
+    education: 0.10
+    projects: 0.25
+
+  job_description_devops_engineer:
+    skills: 0.35
+    experience: 0.30
+    education: 0.10
+    projects: 0.25
+
+  job_description_mobile_application_developer:
+    skills: 0.40
+    experience: 0.20
+    education: 0.10
+    projects: 0.30

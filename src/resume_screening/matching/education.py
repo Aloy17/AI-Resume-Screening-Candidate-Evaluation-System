@@ -14,12 +14,29 @@ PREFERRED_WEIGHT = 0.20
 DEGREE_LEVELS = {
     "high school": 1,
     "secondary": 1,
+    "ssc": 1,
+    "hsc": 1,
     "diploma": 2,
     "associate": 2,
     "bachelor": 3,
     "undergraduate": 3,
+    "bca": 3,
+    "b tech": 3,
+    "b e": 3,
+    "b sc": 3,
+    "b com": 3,
+    "b a": 3,
+    "bba": 3,
+    "ba": 3,
     "master": 4,
     "postgraduate": 4,
+    "mca": 4,
+    "mba": 4,
+    "m tech": 4,
+    "m e": 4,
+    "m sc": 4,
+    "m com": 4,
+    "ma": 4,
     "doctorate": 5,
     "phd": 5,
     "doctoral": 5,
@@ -28,7 +45,12 @@ DEGREE_LEVELS = {
 FIELD_ALIASES = {
     "computer science": {"computer science", "cs"},
     "information technology": {"information technology", "it"},
-    "computer applications": {"computer applications", "mca"},
+    "computer applications": {
+        "computer applications",
+        "computer application",
+        "mca",
+        "bca",
+    },
     "software engineering": {"software engineering"},
     "electronics": {"electronics", "ece"},
     "electrical engineering": {"electrical engineering", "eee"},
@@ -36,6 +58,12 @@ FIELD_ALIASES = {
     "data science": {"data science"},
     "artificial intelligence": {"artificial intelligence", "ai"},
     "cybersecurity": {"cybersecurity", "cyber security"},
+    "business administration": {
+        "business administration",
+        "management",
+        "mba",
+        "bba",
+    },
 }
 
 
@@ -58,13 +86,6 @@ def _degree_level(text: str) -> int | None:
     ):
         if re.search(rf"\b{re.escape(degree)}\b", normalized):
             return level
-
-    # Common degree abbreviations.
-    if re.search(r"\b(b\s*tech|b\s*e|b\s*sc|b\s*ca|b\s*com|b\s*a)\b", normalized):
-        return 3
-
-    if re.search(r"\b(m\s*tech|m\s*e|m\s*sc|m\s*ca|m\s*com|m\s*a)\b", normalized):
-        return 4
 
     return None
 
@@ -100,6 +121,28 @@ def _field_score(candidate_text: str, requirement_text: str) -> float:
     return 0.0
 
 
+def _extract_field_requirement(requirement: str) -> str:
+    """Remove degree-level terms and qualification filler words."""
+
+    field = _normalize(requirement)
+
+    for degree in sorted(DEGREE_LEVELS, key=len, reverse=True):
+        field = re.sub(
+            rf"\b{re.escape(degree)}\b",
+            " ",
+            field,
+        )
+
+    field = re.sub(
+        r"\b(of|in|or|a|an|degree|equivalent|related|field|"
+        r"minimum|preferred|required|and)\b",
+        " ",
+        field,
+    )
+
+    return " ".join(field.split())
+
+
 def _score_qualification(
     education_entries,
     requirement: str,
@@ -113,22 +156,26 @@ def _score_qualification(
         return 0.0
 
     required_level = _degree_level(requirement)
+    field_requirement = _extract_field_requirement(requirement)
 
     best_score = 0.0
 
     for entry in education_entries:
+        candidate_degree = entry.degree or ""
+        candidate_field = entry.field_of_study or ""
+
         candidate_text = " ".join(
             filter(
                 None,
                 [
-                    entry.degree,
-                    entry.field_of_study,
+                    candidate_degree,
+                    candidate_field,
                     entry.institution,
                 ],
             )
         )
 
-        candidate_level = _degree_level(entry.degree)
+        candidate_level = _degree_level(candidate_degree)
 
         if required_level is None:
             normalized_requirement = _normalize(requirement)
@@ -146,33 +193,15 @@ def _score_qualification(
         else:
             score = (candidate_level / required_level) * 100
 
-        # Check whether the qualification also specifies a field.
-        field_requirement = requirement
-
-        for degree in DEGREE_LEVELS:
-            field_requirement = re.sub(
-                rf"\b{re.escape(degree)}\b",
-                "",
-                field_requirement,
-                flags=re.IGNORECASE,
-            )
-
-        field_requirement = re.sub(
-            r"\b(of|in|or|a|an|degree|equivalent|related|field|minimum|preferred|required)\b",
-            " ",
-            field_requirement,
-            flags=re.IGNORECASE,
-        ).strip()
-
         if field_requirement and required_level is not None:
+            # Include the degree itself because parsers may not have
+            # populated field_of_study separately.
             field_match = _field_score(
-                entry.field_of_study,
+                f"{candidate_degree} {candidate_field}",
                 field_requirement,
             )
 
-            # A field mismatch reduces the score but does not erase
-            # an otherwise valid degree-level match.
-            score = score * (0.70 + 0.30 * field_match / 100)
+            score *= 0.70 + 0.30 * field_match / 100
 
         best_score = max(best_score, score)
 

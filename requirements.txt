@@ -1,6 +1,4 @@
 pymupdf
-pytesseract
-pillow
 sentence-transformers
 numpy
 pyyaml

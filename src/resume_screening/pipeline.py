@@ -65,7 +65,7 @@ def run_pipeline(
             "Job description must be a PDF file."
         )
 
-    weights = weights or load_weights()
+    weights = weights or load_weights(jd_path=jd_path)
     embedder = embedder or Embedder()
 
     # Extract and parse the job description.

@@ -23,12 +23,9 @@ def _score_descriptions(
     requirements: list[str],
     embedder: Embedder,
 ) -> float:
-    """Score project descriptions against JD requirements."""
+    """Score explicit project requirements using one-to-one matching."""
 
-    if not requirements:
-        return 0.0
-
-    if not project_texts:
+    if not requirements or not project_texts:
         return 0.0
 
     project_embeddings = embedder.embed(project_texts)
@@ -36,20 +33,45 @@ def _score_descriptions(
 
     similarities = requirement_embeddings @ project_embeddings.T
 
-    # Each JD requirement is matched with the most relevant project.
-    best_matches = similarities.max(axis=1)
+    pairs = []
 
-    # Convert cosine similarity from [-1, 1] to [0, 100].
-    normalized_scores = np.clip(best_matches, 0.0, 1.0)
+    for requirement_index, row in enumerate(similarities):
+        for project_index, similarity in enumerate(row):
+            pairs.append(
+                (
+                    max(0.0, min(1.0, float(similarity))),
+                    requirement_index,
+                    project_index,
+                )
+            )
 
-    return float(normalized_scores.mean() * 100)
+    pairs.sort(reverse=True)
+
+    matched_requirements = set()
+    matched_projects = set()
+    total_score = 0.0
+
+    for score, requirement_index, project_index in pairs:
+        if requirement_index in matched_requirements:
+            continue
+
+        if project_index in matched_projects:
+            continue
+
+        matched_requirements.add(requirement_index)
+        matched_projects.add(project_index)
+        total_score += score
+
+    # Unmatched requirements receive zero rather than disappearing
+    # from the denominator.
+    return (total_score / len(requirements)) * 100
 
 
 def _score_technologies(
     resume: ResumeData,
     jd: JobDescription,
-) -> float:
-    """Measure overlap between project technologies and JD skills."""
+) -> float | None:
+    """Measure exact overlap between project technologies and JD skills."""
 
     candidate_technologies = {
         _normalize(technology)
@@ -58,22 +80,15 @@ def _score_technologies(
         if technology.strip()
     }
 
-    required = {
+    target_technologies = {
         _normalize(skill)
-        for skill in jd.required_skills
+        for skill in jd.required_skills + jd.preferred_skills
         if skill.strip()
     }
 
-    preferred = {
-        _normalize(skill)
-        for skill in jd.preferred_skills
-        if skill.strip()
-    }
-
-    target_technologies = required | preferred
-
-    if not target_technologies:
-        return 0.0
+    # Missing extracted technology data is unknown, not a zero match.
+    if not candidate_technologies or not target_technologies:
+        return None
 
     matched = candidate_technologies & target_technologies
 
@@ -90,8 +105,6 @@ def score_projects(
     if not resume.projects:
         return 0.0
 
-    requirements = jd.project_requirements or jd.responsibilities
-
     project_texts = [
         " ".join(
             filter(
@@ -102,33 +115,48 @@ def score_projects(
                     " ".join(project.technologies),
                 ],
             )
-        )
+        ).strip()
         for project in resume.projects
     ]
 
     project_texts = [
-        text.strip()
-        for text in project_texts
-        if text.strip()
+        text for text in project_texts if text
     ]
 
-    if not project_texts:
-        return 0.0
+    description_score = None
 
-    if not requirements:
-        return 0.0
-
-    description_score = _score_descriptions(
-        project_texts,
-        requirements,
-        embedder,
-    )
+    # Only explicit project requirements are valid description targets.
+    if jd.project_requirements and project_texts:
+        description_score = _score_descriptions(
+            project_texts,
+            jd.project_requirements,
+            embedder,
+        )
 
     technology_score = _score_technologies(resume, jd)
 
-    final_score = (
-        description_score * DESCRIPTION_WEIGHT
-        + technology_score * TECHNOLOGY_WEIGHT
+    available_components = []
+
+    if description_score is not None:
+        available_components.append(
+            (description_score, DESCRIPTION_WEIGHT)
+        )
+
+    if technology_score is not None:
+        available_components.append(
+            (technology_score, TECHNOLOGY_WEIGHT)
+        )
+
+    if not available_components:
+        return 0.0
+
+    total_weight = sum(
+        weight for _, weight in available_components
     )
+
+    final_score = sum(
+        score * weight
+        for score, weight in available_components
+    ) / total_weight
 
     return round(final_score, 2)
