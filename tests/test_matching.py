@@ -7,6 +7,7 @@ from resume_screening.matching.projects import score_projects
 from resume_screening.matching.skills import _score_skill_group
 from resume_screening.models import (
     EducationEntry,
+    ExperienceEntry,
     JobDescription,
     ProjectEntry,
     ResumeData,
@@ -124,3 +125,48 @@ def test_one_project_cannot_fulfil_multiple_project_requirements():
     )
 
     assert score_projects(resume, jd, FakeEmbedder()) == 50.0
+
+
+def test_project_description_below_similarity_threshold_gets_no_credit():
+    class OrthogonalEmbedder:
+        def embed(self, texts):
+            vectors = []
+            for text in texts:
+                if text == "Build a backend API":
+                    vectors.append([1.0, 0.0, 0.0])
+                else:
+                    vectors.append([0.0, 1.0, 0.0])
+            return np.asarray(vectors, dtype=np.float32)
+
+    score = score_projects(
+        ResumeData(
+            candidate_id="candidate-1",
+            projects=[ProjectEntry(name="Unrelated project", description="An unrelated design project")],
+        ),
+        JobDescription(project_requirements=["Build a backend API"]),
+        OrthogonalEmbedder(),
+    )
+    assert score == 0.0
+
+
+def test_responsibility_matching_does_not_reuse_candidate_bullet():
+    class OneCandidateBulletEmbedder:
+        def embed(self, texts):
+            vectors = []
+            for text in texts:
+                if text == "requirement two":
+                    vectors.append([0.0, 1.0, 0.0])
+                else:
+                    vectors.append([1.0, 0.0, 0.0])
+            return np.asarray(vectors, dtype=np.float32)
+
+    resume = ResumeData(
+        candidate_id="candidate-1",
+        total_experience_years=5,
+        experience=[ExperienceEntry(responsibilities=["generic responsibility"])],
+    )
+    jd = JobDescription(
+        min_experience_years=5,
+        responsibilities=["requirement one", "requirement two"],
+    )
+    assert score_experience(resume, jd, OneCandidateBulletEmbedder()) == 85.0
