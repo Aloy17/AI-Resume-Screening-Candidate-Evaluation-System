@@ -126,15 +126,22 @@ def display_ranking(results: list) -> None:
 
     for result in results:
         scores = result.scores.to_dict()
+        applicability = result.scores.applicability_dict()
+
+        def display_score(category: str) -> str:
+            if applicability.get(category) == "not_applicable":
+                return "N/A"
+            score = scores[category]
+            return "N/A" if score is None else f"{score:.2f}"
 
         rows.append([
             str(result.rank),
             result.candidate_id,
-            f"{result.final_score:.2f}",
-            f"{scores['skills']:.2f}",
-            f"{scores['experience']:.2f}",
-            f"{scores['education']:.2f}",
-            f"{scores['projects']:.2f}",
+            "N/A" if result.final_score is None else f"{result.final_score:.2f}",
+            display_score("skills"),
+            display_score("experience"),
+            display_score("education"),
+            display_score("projects"),
         ])
 
     widths = [

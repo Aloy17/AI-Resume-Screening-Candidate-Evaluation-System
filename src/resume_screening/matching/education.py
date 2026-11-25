@@ -67,6 +67,12 @@ FIELD_ALIASES = {
 }
 
 
+def is_education_applicable(jd: JobDescription) -> bool:
+    """Education is applicable only when the JD has a degree requirement."""
+
+    return bool(jd.required_education or jd.preferred_education)
+
+
 def _normalize(text: str) -> str:
     """Normalize text for qualification comparison."""
     text = text.lower().strip()
@@ -211,14 +217,17 @@ def _score_qualification(
 def score_education(
     resume: ResumeData,
     jd: JobDescription,
-) -> float:
+) -> float | None:
     """Calculate the candidate's education match score (0–100)."""
 
     required = jd.required_education
     preferred = jd.preferred_education
 
     if not required and not preferred:
-        return 100.0
+        return None
+
+    if not resume.education:
+        return 0.0
 
     required_score = _score_qualification(
         resume.education,

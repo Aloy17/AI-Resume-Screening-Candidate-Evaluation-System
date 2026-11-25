@@ -10,10 +10,22 @@ def rank_candidates(results: list[CandidateResult]) -> list[CandidateResult]:
 
     Ties on final score are broken by skills score, then by candidate id, so output is deterministic.
     """
-    ordered = sorted(
-        results,
-        key=lambda r: (-r.final_score, -r.scores.skills, r.candidate_id),
-    )
+    def sort_key(result: CandidateResult) -> tuple:
+        if result.final_score is None:
+            return (1, 0.0, 0.0, result.candidate_id)
+
+        skills = result.scores.skills
+        if skills is None:
+            skills = 0.0
+
+        return (
+            0,
+            -result.final_score,
+            -skills,
+            result.candidate_id,
+        )
+
+    ordered = sorted(results, key=sort_key)
     for position, result in enumerate(ordered, start=1):
         result.rank = position
     return ordered

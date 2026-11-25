@@ -11,6 +11,32 @@ YEARS_WEIGHT = 0.70
 RESPONSIBILITIES_WEIGHT = 0.30
 
 
+def _resume_has_experience_section(resume: ResumeData) -> bool:
+    status = resume.extraction_status.get("experience")
+    if status:
+        normalized = status.value if hasattr(status, "value") else str(status)
+        if normalized == "missing":
+            return False
+        return normalized in {"empty", "ambiguous", "extracted"}
+    return bool(resume.experience)
+
+
+def is_experience_applicable(resume: ResumeData, jd: JobDescription) -> bool:
+    """Experience applies from resume evidence or JD experience criteria."""
+
+    if _resume_has_experience_section(resume):
+        return True
+
+    has_year_requirement = (
+        jd.min_experience_years > 0.0
+        or jd.max_experience_years is not None
+    )
+    has_responsibility_criteria = bool(
+        [item for item in jd.responsibilities if item.strip()]
+    )
+    return has_year_requirement or has_responsibility_criteria
+
+
 def _score_years(resume: ResumeData, jd: JobDescription) -> float:
     """Score candidate experience against the JD's experience range."""
 
@@ -88,8 +114,39 @@ def score_experience(
     resume: ResumeData,
     jd: JobDescription,
     embedder: Embedder,
-) -> float:
+) -> float | None:
     """Calculate the candidate's experience match score (0–100)."""
+
+    if not _resume_has_experience_section(resume):
+        has_year_requirement = (
+            jd.min_experience_years > 0.0
+            or jd.max_experience_years is not None
+        )
+        has_responsibility_criteria = bool(
+            [item for item in jd.responsibilities if item.strip()]
+        )
+        return 0.0 if has_year_requirement or has_responsibility_criteria else None
+
+    if not resume.experience:
+        return 0.0
+
+    has_year_requirement = (
+        jd.min_experience_years > 0.0
+        or jd.max_experience_years is not None
+    )
+    has_responsibility_criteria = bool(
+        [item for item in jd.responsibilities if item.strip()]
+    )
+
+    if not has_year_requirement and not has_responsibility_criteria:
+        entry_score = min(len(resume.experience) / 3.0, 1.0) * 50.0
+        responsibility_count = sum(
+            len(entry.responsibilities)
+            for entry in resume.experience
+        )
+        responsibility_score = min(responsibility_count / 5.0, 1.0) * 30.0
+        duration_score = min(resume.total_experience_years / 3.0, 1.0) * 20.0
+        return round(entry_score + responsibility_score + duration_score, 2)
 
     years_score = _score_years(resume, jd)
 
@@ -98,6 +155,14 @@ def score_experience(
         jd,
         embedder,
     )
+
+    if (
+        jd.min_experience_years == 0.0
+        and jd.max_experience_years is None
+    ):
+        if responsibility_score is None:
+            return 0.0
+        return round(responsibility_score, 2)
 
     if responsibility_score is None:
         return round(years_score, 2)

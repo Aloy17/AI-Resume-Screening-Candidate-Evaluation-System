@@ -14,6 +14,12 @@ TECHNOLOGY_WEIGHT = 0.30
 DESCRIPTION_SIMILARITY_THRESHOLD = 0.65
 
 
+def is_projects_applicable(jd: JobDescription) -> bool:
+    """Projects are always applicable."""
+
+    return True
+
+
 def _normalize(value: str) -> str:
     """Normalize text for exact comparison."""
     return " ".join(value.lower().strip().split())
@@ -96,8 +102,11 @@ def score_projects(
     resume: ResumeData,
     jd: JobDescription,
     embedder: Embedder,
-) -> float:
+) -> float | None:
     """Calculate the candidate's project match score (0–100)."""
+
+    if not is_projects_applicable(jd):
+        return None
 
     if not resume.projects:
         return 0.0
@@ -119,6 +128,39 @@ def score_projects(
     project_texts = [
         text for text in project_texts if text
     ]
+
+    if not jd.project_requirements:
+        project_count_score = min(len(project_texts) / 3.0, 1.0) * 50.0
+
+        description_quality_score = 0.0
+        if project_texts:
+            average_description_length = sum(
+                len(text) for text in project_texts
+            ) / len(project_texts)
+            description_quality_score = min(
+                average_description_length / 180.0,
+                1.0,
+            ) * 30.0
+
+        explicit_technology_count = sum(
+            len({
+                _normalize(technology)
+                for technology in project.technologies
+                if technology.strip()
+            })
+            for project in resume.projects
+        )
+        technology_evidence_score = min(
+            explicit_technology_count / 5.0,
+            1.0,
+        ) * 20.0
+
+        return round(
+            project_count_score
+            + description_quality_score
+            + technology_evidence_score,
+            2,
+        )
 
     description_score = None
 

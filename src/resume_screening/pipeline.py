@@ -9,12 +9,16 @@ from .config import Weights, load_weights
 from .embeddings import Embedder
 from .extraction import extract_text
 from .matching import (
+    is_education_applicable,
+    is_experience_applicable,
+    is_projects_applicable,
+    is_skills_applicable,
     score_education,
     score_experience,
     score_projects,
     score_skills,
 )
-from .models import CandidateResult, CategoryScores
+from .models import CandidateResult, CategoryScores, CategoryStatus
 from .parsing import clean_text, parse_job_description, parse_resume
 from .ranking import rank_candidates
 from .scoring import compute_final_score
@@ -84,12 +88,47 @@ def run_pipeline(
             source_file=pdf_path.name,
         )
 
+        applicability = {
+            "skills": (
+                CategoryStatus.APPLICABLE
+                if is_skills_applicable(resume, jd)
+                else CategoryStatus.NOT_APPLICABLE
+            ),
+            "experience": (
+                CategoryStatus.APPLICABLE
+                if is_experience_applicable(resume, jd)
+                else (
+                    CategoryStatus.APPLICABLE
+                    if (
+                        jd.min_experience_years > 0.0
+                        or jd.max_experience_years is not None
+                        or bool([
+                            item for item in jd.responsibilities
+                            if item.strip()
+                        ])
+                    )
+                    else CategoryStatus.NOT_APPLICABLE
+                )
+            ),
+            "education": (
+                CategoryStatus.APPLICABLE
+                if is_education_applicable(jd)
+                else CategoryStatus.NOT_APPLICABLE
+            ),
+            "projects": (
+                CategoryStatus.APPLICABLE
+                if is_projects_applicable(jd)
+                else CategoryStatus.NOT_APPLICABLE
+            ),
+        }
+
         # Calculate individual category scores.
         scores = CategoryScores(
             skills=score_skills(resume, jd, embedder),
             experience=score_experience(resume, jd, embedder),
             education=score_education(resume, jd),
             projects=score_projects(resume, jd, embedder),
+            applicability=applicability,
         )
 
         # Calculate the overall suitability score.

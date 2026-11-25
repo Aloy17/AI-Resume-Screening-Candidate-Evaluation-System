@@ -23,6 +23,11 @@ def clean_text(raw_text: str) -> str:
         text,
     )
 
+    # PDF generators commonly insert a few known invisible formatting
+    # characters. Remove only those that interfere with text/heading parsing;
+    # do not strip all Unicode format characters or meaningful script data.
+    text = re.sub(r"[\u200b\u2060\ufeff]", "", text)
+
     text = "".join(
         char
         for char in text

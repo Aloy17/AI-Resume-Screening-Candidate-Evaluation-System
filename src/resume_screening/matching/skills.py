@@ -14,6 +14,24 @@ PREFERRED_WEIGHT = 0.20
 SEMANTIC_THRESHOLD = 0.75
 
 
+def _resume_has_skills_section(resume: ResumeData) -> bool:
+    status = resume.extraction_status.get("skills")
+    if status:
+        normalized = status.value if hasattr(status, "value") else str(status)
+        if normalized == "missing":
+            return False
+        return normalized in {"empty", "ambiguous", "extracted"}
+    return bool(resume.skills)
+
+
+def is_skills_applicable(resume: ResumeData, jd: JobDescription) -> bool:
+    """Skills require JD or resume evidence; neither means N/A."""
+
+    has_resume_section = _resume_has_skills_section(resume)
+    has_jd_requirements = bool(jd.required_skills or jd.preferred_skills)
+    return has_resume_section or has_jd_requirements
+
+
 def _normalize_skill(skill: str) -> str:
     """Normalize a skill name for exact comparison."""
     return " ".join(skill.lower().strip().split())
@@ -110,13 +128,26 @@ def score_skills(
     resume: ResumeData,
     jd: JobDescription,
     embedder: Embedder,
-) -> float:
+) -> float | None:
     """Calculate the candidate's overall skills match score (0–100)."""
 
     required_skills = jd.required_skills
     preferred_skills = jd.preferred_skills
 
     if not required_skills and not preferred_skills:
+        if not _resume_has_skills_section(resume):
+            return None
+        if not resume.skills:
+            return 0.0
+
+        unique_skills = sorted({
+            _normalize_skill(skill)
+            for skill in resume.skills
+            if skill.strip()
+        })
+        return round(min(len(unique_skills) / 10.0, 1.0) * 100, 2)
+
+    if not _resume_has_skills_section(resume):
         return 0.0
 
     candidate_skills = resume.skills

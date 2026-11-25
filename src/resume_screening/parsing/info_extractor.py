@@ -7,6 +7,7 @@ from datetime import date
 from ..models import (
     EducationEntry,
     ExperienceEntry,
+    ExtractionStatus,
     JobDescription,
     ProjectEntry,
     ResumeData,
@@ -21,16 +22,26 @@ SECTION_HEADINGS = {
     "skills": {
         "skills",
         "technical skills",
+        "technical proficiencies",
+        "technical proficiency",
+        "technical expertise",
         "core competencies",
+        "core skills",
         "technical competencies",
         "technologies",
         "tools and technologies",
+        "technology stack",
+        "proficiencies",
     },
     "experience": {
         "experience",
         "work experience",
         "professional experience",
+        "career experience",
+        "career history",
         "employment history",
+        "employment",
+        "professional history",
         "work history",
         "internship experience",
         "internships",
@@ -39,11 +50,19 @@ SECTION_HEADINGS = {
     "education": {
         "education",
         "academic background",
+        "academic history",
+        "academic qualifications",
         "educational qualifications",
         "qualifications",
+        "training",
     },
     "projects": {
         "projects",
+        "key projects",
+        "selected projects",
+        "notable projects",
+        "technical projects",
+        "project highlights",
         "academic projects",
         "personal projects",
         "project experience",
@@ -70,7 +89,12 @@ SKILL_KEYWORDS = {
     "c": ["c programming", "c language"],
     "c++": ["c++"],
     "c#": ["c#"],
-    "javascript": ["javascript", "java script"],
+    "javascript": [
+        "javascript",
+        "java script",
+        "javascript es6",
+        "javascript (es6",
+    ],
     "typescript": ["typescript", "type script"],
     "kotlin": ["kotlin"],
     "dart": ["dart"],
@@ -78,12 +102,16 @@ SKILL_KEYWORDS = {
     "shell scripting": ["shell scripting", "shell script"],
 
     # Web development
-    "html": ["html"],
-    "css": ["css"],
-    "react": ["react", "react.js"],
+    "html": ["html", "html5", "semantic html", "semantic html5"],
+    "css": ["css", "css3", "modern css", "modern css3"],
+    "react": ["react", "react.js", "reactjs"],
+    "vue": ["vue", "vue.js"],
     "react native": ["react native"],
     "next.js": ["next.js", "nextjs"],
     "angular": ["angular"],
+    "tailwind css": ["tailwind css", "tailwind"],
+    "vite": ["vite"],
+    "webpack": ["webpack"],
     "node.js": ["node.js", "nodejs"],
     "express.js": ["express.js"],
     "django": ["django"],
@@ -223,9 +251,9 @@ SKILL_KEYWORDS = {
 # --------------------------------------------------
 
 def _clean_invisible_characters(text: str) -> str:
-    """Remove invisible Unicode formatting characters."""
+    """Remove formatting characters that PDF text commonly adds by mistake."""
 
-    return re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", text)
+    return re.sub(r"[\u200b\u2060\ufeff]", "", text)
 
 
 def _normalize_heading(line: str) -> str:
@@ -233,10 +261,11 @@ def _normalize_heading(line: str) -> str:
 
     line = _clean_invisible_characters(line)
     line = line.strip().lower()
+    line = re.sub(r"^\s*(?:\d+\s*[.)]|[•●▪◦*])\s*", "", line)
     line = re.sub(r"[:\-–—]+$", "", line)
     line = re.sub(r"[^a-z0-9 &/]+", "", line)
 
-    return line.strip()
+    return re.sub(r"\s+", " ", line).strip()
 
 
 def _extract_sections(text: str) -> dict[str, str]:
@@ -316,6 +345,62 @@ def _split_blocks(text: str) -> list[str]:
     ]
 
 
+def _split_experience_blocks(text: str) -> list[str]:
+    """Split compact experience text at consecutive pipe-separated role lines."""
+
+    blocks = []
+    role_markers = (
+        "intern", "engineer", "developer", "manager",
+        "analyst", "consultant", "specialist", "coordinator",
+        "lead", "associate", "director", "executive",
+    )
+
+    for block in _split_blocks(text):
+        lines = [
+            line.strip()
+            for line in block.splitlines()
+            if line.strip()
+        ]
+        role_indexes = [
+            index for index, line in enumerate(lines)
+            if "|" in line
+            and any(marker in line.lower() for marker in role_markers)
+        ]
+
+        if len(role_indexes) < 2:
+            blocks.append(block)
+            continue
+
+        starts = role_indexes
+        for position, start in enumerate(starts):
+            end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+            segment = "\n".join(lines[start:end]).strip()
+            if segment:
+                blocks.append(segment)
+
+    return blocks
+
+
+def _section_status(
+    sections: dict[str, str],
+    section_name: str,
+    extracted_count: int,
+) -> ExtractionStatus:
+    """Describe extraction state without turning it into a downstream score."""
+
+    if section_name not in sections:
+        return ExtractionStatus.MISSING
+
+    raw_section = sections.get(section_name, "").strip()
+    if not raw_section:
+        return ExtractionStatus.EMPTY
+
+    if extracted_count > 0:
+        return ExtractionStatus.EXTRACTED
+
+    return ExtractionStatus.AMBIGUOUS
+
+
 # --------------------------------------------------
 # 3. Date extraction
 # --------------------------------------------------
@@ -332,6 +417,20 @@ DATE_PATTERN = re.compile(
     rf"\s*(?:-|–|—|to)\s*"
     rf"(?:(?P<end_month>{MONTH_PATTERN})?"
     rf"\s*(?P<end_year>19\d{{2}}|20\d{{2}}|present|current))",
+    re.IGNORECASE,
+)
+
+NUMERIC_DATE_RANGE_PATTERN = re.compile(
+    r"(?P<start>"
+    r"(?:19\d{2}|20\d{2})(?:[-/](?:0?[1-9]|1[0-2]))?"
+    r"|(?:0?[1-9]|1[0-2])[-/](?:19\d{2}|20\d{2})"
+    r")"
+    r"\s*(?:-|–|—|to)\s*"
+    r"(?P<end>"
+    r"(?:19\d{2}|20\d{2})(?:[-/](?:0?[1-9]|1[0-2]))?"
+    r"|(?:0?[1-9]|1[0-2])[-/](?:19\d{2}|20\d{2})"
+    r"|present|current"
+    r")",
     re.IGNORECASE,
 )
 
@@ -379,21 +478,47 @@ def _get_date_range_months(
     """Return the inclusive start and end month indices."""
 
     match = DATE_PATTERN.search(text)
+    if match:
+        start = _month_index(
+            match.group("start_month"),
+            match.group("start_year"),
+            False,
+        )
 
-    if not match:
-        return None
+        end = _month_index(
+            match.group("end_month"),
+            match.group("end_year"),
+            True,
+        )
+    else:
+        numeric_match = NUMERIC_DATE_RANGE_PATTERN.search(text)
+        if not numeric_match:
+            return None
 
-    start = _month_index(
-        match.group("start_month"),
-        match.group("start_year"),
-        False,
-    )
+        def parse_numeric(value: str, is_end: bool) -> int:
+            value = value.strip().lower()
+            if value in {"present", "current"}:
+                year_number = date.today().year
+                month_number = 12 if is_end else 1
+                return year_number * 12 + month_number
 
-    end = _month_index(
-        match.group("end_month"),
-        match.group("end_year"),
-        True,
-    )
+            if "-" in value:
+                left, right = value.split("-", 1)
+                if left.isdigit() and len(left) == 4:
+                    return int(left) * 12 + (int(right) if right.isdigit() else (12 if is_end else 1))
+                return int(right) * 12 + int(left)
+
+            if "/" in value:
+                left, right = value.split("/", 1)
+                if left.isdigit() and len(left) == 4:
+                    return int(left) * 12 + (int(right) if right.isdigit() else (12 if is_end else 1))
+                return int(right) * 12 + int(left)
+
+            year_number = int(value)
+            return year_number * 12 + (12 if is_end else 1)
+
+        start = parse_numeric(numeric_match.group("start"), False)
+        end = parse_numeric(numeric_match.group("end"), True)
 
     if end < start:
         return None
@@ -419,7 +544,7 @@ def _get_total_experience_months(text: str) -> int:
 
     intervals = []
 
-    for block in _split_blocks(text):
+    for block in _split_experience_blocks(text):
         date_range = _get_date_range_months(block)
 
         if date_range:
@@ -459,7 +584,7 @@ def _extract_experience(text: str) -> list[ExperienceEntry]:
     text = _clean_invisible_characters(text)
 
     entries = []
-    blocks = _split_blocks(text)
+    blocks = _split_experience_blocks(text)
 
     for block_index, block in enumerate(blocks):
         lines = [line.strip() for line in block.splitlines() if line.strip()]
@@ -470,6 +595,47 @@ def _extract_experience(text: str) -> list[ExperienceEntry]:
                 date_location = (line_index, match)
                 break
         if date_location is None:
+            numeric_match = NUMERIC_DATE_RANGE_PATTERN.search(block)
+            if numeric_match:
+                for line_index, line in enumerate(lines):
+                    if NUMERIC_DATE_RANGE_PATTERN.search(line):
+                        date_location = (line_index, numeric_match)
+                        break
+        if date_location is None:
+            if not lines:
+                continue
+
+            first_line = _clean_bullet(lines[0])
+            role_markers = (
+                "intern", "engineer", "developer", "manager",
+                "analyst", "consultant", "specialist", "coordinator",
+                "lead", "associate", "director", "executive",
+            )
+
+            if "|" in first_line:
+                title, company = [
+                    part.strip()
+                    for part in first_line.split("|", 1)
+                ]
+            elif any(marker in first_line.lower() for marker in role_markers):
+                title, company = first_line, ""
+            else:
+                continue
+
+            responsibilities = [
+                _clean_bullet(line)
+                for line in lines[1:]
+                if _clean_bullet(line)
+            ]
+
+            entries.append(
+                ExperienceEntry(
+                    title=title,
+                    company=company,
+                    duration_months=None,
+                    responsibilities=list(dict.fromkeys(responsibilities)),
+                )
+            )
             continue
 
         date_index, date_match = date_location
@@ -692,9 +858,40 @@ def _extract_projects(text: str) -> list[ProjectEntry]:
     entries = []
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     heading_pattern = re.compile(r"^.{2,90}\s+[–—]\s+.{2,90}$")
+    pipe_heading_pattern = re.compile(r"^.{2,90}\s*\|\s*.{2,90}$")
+    labeled_heading_pattern = re.compile(
+        r"^.{2,60}\s*:\s*.{2,90}$",
+        re.IGNORECASE,
+    )
     heading_indexes = [
         index for index, line in enumerate(lines)
-        if heading_pattern.match(line)
+        if (
+            heading_pattern.match(line)
+            or pipe_heading_pattern.match(line)
+            or (
+                re.match(r"(?i)^project\s+\d*\s*[:\-]", line)
+                is not None
+            )
+            or (
+                index + 1 < len(lines)
+                and re.match(r"^\s*[•●▪◦*+\-]\s*", lines[index + 1])
+                and not re.match(
+                    r"(?i)^(technologies|technology|tech stack|tools|focus|status)\s*:",
+                    line,
+                )
+                and "|" not in line
+                and ":" not in line
+                and "," not in line
+                and "." not in line
+            )
+            or (
+                labeled_heading_pattern.match(line)
+                and not re.match(
+                    r"(?i)^(technologies|technology|tech stack|tools|focus|status)\s*:",
+                    line,
+                )
+            )
+        )
     ]
 
     if heading_indexes:
@@ -793,6 +990,25 @@ def parse_resume(
         sections.get("experience", "")
     )
 
+    extraction_status = {
+        "skills": _section_status(sections, "skills", len(skills)),
+        "experience": _section_status(
+            sections,
+            "experience",
+            len(experience),
+        ),
+        "education": _section_status(
+            sections,
+            "education",
+            len(education),
+        ),
+        "projects": _section_status(
+            sections,
+            "projects",
+            len(projects),
+        ),
+    }
+
     return ResumeData(
         candidate_id=candidate_id,
         source_file=source_file,
@@ -801,6 +1017,7 @@ def parse_resume(
         education=education,
         projects=projects,
         total_experience_years=round(total_months / 12, 2),
+        extraction_status=extraction_status,
     )
 
 
@@ -821,10 +1038,18 @@ JD_SECTION_HEADINGS = {
         "required technical skills",
         "technical skills",
         "required skills",
+        "required qualifications",
+        "minimum qualifications",
+        "mandatory skills",
+        "must have",
+        "core qualifications",
         "skills",
     },
     "experience": {
         "required experience",
+        "minimum experience",
+        "experience requirements",
+        "experience qualification",
         "professional experience",
         "experience required",
         "experience",
@@ -844,10 +1069,17 @@ JD_SECTION_HEADINGS = {
         "responsibilities",
         "roles and responsibilities",
         "job responsibilities",
+        "key duties",
+        "duties",
+        "what youll do",
+        "what you will do",
     },
     "projects": {
         "relevant project experience",
         "project requirements",
+        "project deliverables",
+        "project experience",
+        "key projects",
         "projects",
     },
     "preferred": {
@@ -873,7 +1105,7 @@ def _normalize_jd_heading(line: str) -> str:
     line = re.sub(r"[:\-–—]+$", "", line)
     line = re.sub(r"[^a-z0-9 &/]+", "", line)
 
-    return line.strip()
+    return re.sub(r"\s+", " ", line).strip()
 
 
 def _extract_jd_sections(text: str) -> dict[str, str]:
@@ -976,8 +1208,6 @@ def _extract_required_preferred_skills(
     preferred.update(
         _extract_skills(preferred_text)
     )
-
-    required.difference_update(preferred)
 
     return sorted(required), sorted(preferred)
 
@@ -1260,6 +1490,53 @@ def parse_job_description(text: str) -> JobDescription:
         sections.get("evaluation", "")
     )
 
+    experience_status = ExtractionStatus.MISSING
+    if sections.get("experience", "").strip() or job_details.strip():
+        experience_status = (
+            ExtractionStatus.EXTRACTED
+            if min_experience or max_experience is not None
+            else ExtractionStatus.AMBIGUOUS
+        )
+
+    extraction_status = {
+        "title": (
+            ExtractionStatus.EXTRACTED
+            if title
+            else ExtractionStatus.AMBIGUOUS
+        ),
+        "required_skills": _section_status(
+            sections,
+            "skills",
+            len(required_skills),
+        ),
+        "preferred_skills": _section_status(
+            sections,
+            "preferred",
+            len(preferred_skills),
+        ),
+        "experience": experience_status,
+        "education": _section_status(
+            sections,
+            "education",
+            1 if required_education or preferred_education else 0,
+        ),
+        "responsibilities": _section_status(
+            sections,
+            "responsibilities",
+            len(responsibilities),
+        ),
+        "projects": _section_status(
+            sections,
+            "projects",
+            len(project_requirements),
+        ),
+        "certifications": _section_status(
+            sections,
+            "certifications",
+            len(required_certifications) + len(preferred_certifications),
+        ),
+    }
+
     # --------------------------------------------------
     # Final structured result
     # --------------------------------------------------
@@ -1278,4 +1555,5 @@ def parse_job_description(text: str) -> JobDescription:
         preferred_certifications=preferred_certifications,
         evaluation_emphasis=evaluation_emphasis,
         raw_text=text,
+        extraction_status=extraction_status,
     )
