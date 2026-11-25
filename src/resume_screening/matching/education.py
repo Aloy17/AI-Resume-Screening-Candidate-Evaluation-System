@@ -58,6 +58,7 @@ FIELD_ALIASES = {
     "data science": {"data science"},
     "artificial intelligence": {"artificial intelligence", "ai"},
     "cybersecurity": {"cybersecurity", "cyber security"},
+    "information security": {"information security"},
     "business administration": {
         "business administration",
         "management",
@@ -141,7 +142,8 @@ def _extract_field_requirement(requirement: str) -> str:
 
     field = re.sub(
         r"\b(of|in|or|a|an|degree|equivalent|related|field|"
-        r"minimum|preferred|required|and)\b",
+        r"minimum|preferred|required|and|technical|completed|"
+        r"earned|obtained|graduated|hold|holder|held|must)\b",
         " ",
         field,
     )
@@ -163,12 +165,27 @@ def _score_qualification(
 
     required_level = _degree_level(requirement)
     field_requirement = _extract_field_requirement(requirement)
+    completion_required = bool(
+        re.search(
+            r"\b(completed|earned|obtained|graduated|hold|holder|held)\b",
+            requirement,
+            re.IGNORECASE,
+        )
+    )
 
     best_score = 0.0
 
     for entry in education_entries:
         candidate_degree = entry.degree or ""
         candidate_field = entry.field_of_study or ""
+        in_progress = entry.in_progress or bool(
+            re.search(
+                r"\b(pursuing|in progress|currently enrolled|"
+                r"currently studying|expected(?: graduation)?|present|current)\b",
+                candidate_degree,
+                re.IGNORECASE,
+            )
+        )
 
         candidate_text = " ".join(
             filter(
@@ -198,6 +215,15 @@ def _score_qualification(
             score = 100.0
         else:
             score = (candidate_level / required_level) * 100
+
+        if in_progress and required_level is not None:
+            if completion_required:
+                score = 0.0
+            else:
+                incomplete_level_score = (
+                    max(0, required_level - 1) / required_level
+                ) * 100
+                score = min(score, incomplete_level_score)
 
         if field_requirement and required_level is not None:
             # Include the degree itself because parsers may not have

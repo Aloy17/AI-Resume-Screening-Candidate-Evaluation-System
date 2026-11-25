@@ -41,6 +41,7 @@ def _score_skill_group(
     candidate_skills: list[str],
     target_skills: list[str],
     embedder: Embedder,
+    alternative_groups: list[list[str]] | None = None,
 ) -> float:
     """Score JD skills while allowing each candidate skill one match."""
 
@@ -58,70 +59,99 @@ def _score_skill_group(
     if not targets or not candidates:
         return 0.0
 
-    candidate_indices = {
-        skill: index for index, skill in enumerate(candidates)
-    }
+    target_set = set(targets)
+    target_groups = []
+    grouped_targets = set()
+
+    for group in sorted(
+        {
+            tuple(sorted({
+                _normalize_skill(skill)
+                for skill in alternative_group
+                if _normalize_skill(skill) in target_set
+            }))
+            for alternative_group in alternative_groups or []
+        }
+    ):
+        if len(group) > 1 and not (set(group) & grouped_targets):
+            target_groups.append(list(group))
+            grouped_targets.update(group)
+
+    target_groups.extend(
+        [target] for target in targets if target not in grouped_targets
+    )
+
+    assigned_targets = set()
+    assigned_candidates = set()
+    total_score = 0.0
 
     # Exact matches take priority and reserve their candidate skills.
-    exact_matches = set(candidates) & set(targets)
-    matched_targets = set(exact_matches)
-    matched_candidates = {
-        candidate_indices[skill] for skill in exact_matches
-    }
+    exact_pairs = [
+        (target_index, candidate_index)
+        for target_index, group in enumerate(target_groups)
+        for candidate_index, candidate in enumerate(candidates)
+        if candidate in group
+    ]
+    for target_index, candidate_index in exact_pairs:
+        if target_index in assigned_targets:
+            continue
+        if candidate_index in assigned_candidates:
+            continue
+        assigned_targets.add(target_index)
+        assigned_candidates.add(candidate_index)
+        total_score += 1.0
 
-    total_score = float(len(exact_matches))
-    unmatched_targets = [
-        skill for skill in targets if skill not in matched_targets
+    unmatched_target_groups = [
+        (index, group)
+        for index, group in enumerate(target_groups)
+        if index not in assigned_targets
     ]
     available_candidates = [
-        (index, skill)
-        for index, skill in enumerate(candidates)
-        if index not in matched_candidates
+        (index, candidate)
+        for index, candidate in enumerate(candidates)
+        if index not in assigned_candidates
     ]
 
-    if unmatched_targets and available_candidates:
-        candidate_texts = [
-            skill for _, skill in available_candidates
-        ]
-
-        candidate_embeddings = embedder.embed(candidate_texts)
-        target_embeddings = embedder.embed(unmatched_targets)
-
+    if unmatched_target_groups and available_candidates:
+        target_texts = sorted({
+            skill
+            for _, group in unmatched_target_groups
+            for skill in group
+        })
+        target_embeddings = embedder.embed(target_texts)
+        candidate_embeddings = embedder.embed(
+            [candidate for _, candidate in available_candidates]
+        )
         similarities = target_embeddings @ candidate_embeddings.T
+        target_indices = {
+            skill: index for index, skill in enumerate(target_texts)
+        }
 
-        # Build all eligible pairs, then assign the strongest pairs first.
         pairs = []
-
-        for target_index, row in enumerate(similarities):
-            for candidate_index, similarity in enumerate(row):
+        for group_index, group in unmatched_target_groups:
+            member_indices = [target_indices[skill] for skill in group]
+            group_similarities = similarities[member_indices].max(axis=0)
+            for candidate_index, similarity in enumerate(group_similarities):
                 score = float(similarity)
-
                 if score >= SEMANTIC_THRESHOLD:
+                    original_candidate_index = available_candidates[
+                        candidate_index
+                    ][0]
                     pairs.append(
-                        (
-                            score,
-                            target_index,
-                            candidate_index,
-                        )
+                        (score, group_index, original_candidate_index)
                     )
 
         pairs.sort(reverse=True)
-
-        assigned_targets = set()
-        assigned_candidates = set()
-
         for score, target_index, candidate_index in pairs:
             if target_index in assigned_targets:
                 continue
-
             if candidate_index in assigned_candidates:
                 continue
-
-            total_score += min(score, 1.0)
             assigned_targets.add(target_index)
             assigned_candidates.add(candidate_index)
+            total_score += min(score, 1.0)
 
-    return (total_score / len(targets)) * 100
+    return (total_score / len(target_groups)) * 100
 
 
 def score_skills(
@@ -156,12 +186,14 @@ def score_skills(
         candidate_skills,
         required_skills,
         embedder,
+        jd.required_skill_alternatives,
     )
 
     preferred_score = _score_skill_group(
         candidate_skills,
         preferred_skills,
         embedder,
+        jd.preferred_skill_alternatives,
     )
 
     if not preferred_skills:

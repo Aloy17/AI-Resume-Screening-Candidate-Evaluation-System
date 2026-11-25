@@ -84,6 +84,17 @@ def test_projects_split_consecutive_headings_and_skip_proposed_work():
     assert all("Password Strength Analyzer" not in item.name for item in entries)
 
 
+def test_project_name_containing_resume_is_not_filtered_as_a_document_title():
+    entries = _extract_projects(
+        """Resume Builder — AI-Powered Application Tracker
+Creates and tracks tailored job applications.
+"""
+    )
+
+    assert len(entries) == 1
+    assert entries[0].name == "Resume Builder — AI-Powered Application Tracker"
+
+
 CANDIDATE_17_EDUCATION = """ITM Skills University - MCA\u200b
 \u200b
 \u200b
@@ -134,6 +145,132 @@ Dashboard — Analytics portal
     assert "software engineer" in sections["experience"].lower()
     assert "bachelor" in sections["education"].lower()
     assert "dashboard" in sections["projects"].lower()
+
+
+def test_technical_analytical_headings_are_recognized_explicitly():
+    sections = _extract_sections(
+        """TECHNICAL & ANALYTICAL SKILLS
+Python, SQL
+ANALYTICAL & STRATEGIC PROJECTS
+Market analytics dashboard
+"""
+    )
+
+    assert "python" in sections["skills"].lower()
+    assert "market analytics dashboard" in sections["projects"].lower()
+
+
+def test_candidate_19_previously_missed_headings_are_extracted():
+    repo_root = Path(__file__).resolve().parents[1]
+    resume_path = repo_root / "data/anonymized_resumes/Candidate_19.pdf"
+    resume = parse_resume(
+        clean_text(extract_text(resume_path)),
+        candidate_id=resume_path.stem,
+        source_file=resume_path.name,
+    )
+
+    assert "sql" in resume.skills
+    assert "python" in resume.skills
+    assert [project.name for project in resume.projects] == [
+        "PotholeGrid AI — Infrastructure Risk & Spatial Analytics Framework",
+        "AI-Driven Precision Agriculture — Predictive Yield Analytics Concept",
+    ]
+    assert all(
+        "Swanand Gagare — Resume" not in project.name
+        and "Page 1 of 2" not in project.description
+        for project in resume.projects
+    )
+    assert resume.extraction_status["skills"] == ExtractionStatus.EXTRACTED
+    assert resume.extraction_status["projects"] == ExtractionStatus.EXTRACTED
+
+
+def test_candidate_8_mca_is_marked_in_progress():
+    repo_root = Path(__file__).resolve().parents[1]
+    resume_path = repo_root / "data/anonymized_resumes/Candidate_8.pdf"
+    resume = parse_resume(
+        clean_text(extract_text(resume_path)),
+        candidate_id=resume_path.stem,
+        source_file=resume_path.name,
+    )
+    mca = next(
+        entry
+        for entry in resume.education
+        if "MCA" in entry.degree
+    )
+
+    assert mca.in_progress
+    assert any(not entry.in_progress for entry in resume.education)
+
+
+def test_jd_skill_alternatives_and_independent_skills_are_preserved():
+    jd = parse_job_description(
+        """Job Title: Developer
+Required Skills:
+1. React, Vue, or Angular
+2. Python or Java
+3. SQL and Git
+Preferred Qualifications:
+1. Flask or Django
+"""
+    )
+
+    assert set(jd.required_skills) == {
+        "react",
+        "vue",
+        "angular",
+        "python",
+        "java",
+        "sql",
+        "git",
+    }
+    assert {tuple(group) for group in jd.required_skill_alternatives} == {
+        ("angular", "react", "vue"),
+        ("java", "python"),
+    }
+    assert jd.preferred_skill_alternatives == [["django", "flask"]]
+
+
+def test_separate_or_groups_do_not_absorb_adjacent_skills():
+    jd = parse_job_description(
+        """Job Title: Developer
+Required Skills:
+1. React or Vue, Python or Java, and SQL
+"""
+    )
+
+    assert {tuple(group) for group in jd.required_skill_alternatives} == {
+        ("react", "vue"),
+        ("java", "python"),
+    }
+
+
+def test_jd_education_parser_preserves_degree_fields():
+    jd = parse_job_description(
+        """Job Title: Security Engineer
+Education Requirements:
+Required:
+1. Bachelor's degree in Computer Science, Information Technology,
+Cybersecurity, or a related technical field.
+Preferred:
+1. Master's degree in Cybersecurity, Information Security, or Computer Science.
+"""
+    )
+
+    assert "BACHELOR" in jd.required_education.upper()
+    assert "COMPUTER SCIENCE" in jd.required_education.upper()
+    assert "CYBERSECURITY" in jd.required_education.upper()
+    assert "MASTER" in jd.preferred_education.upper()
+    assert "INFORMATION SECURITY" in jd.preferred_education.upper()
+
+    wrapped_jd = parse_job_description(
+        """Job Title: Engineer
+Education Requirements:
+Bachelor's degree in Computer
+Science or Information Technology.
+"""
+    )
+    assert "COMPUTER" in wrapped_jd.required_education.upper()
+    assert "INFORMATION TECHNOLOGY" in wrapped_jd.required_education.upper()
 
 
 def test_experience_parses_month_year_and_numeric_ranges():

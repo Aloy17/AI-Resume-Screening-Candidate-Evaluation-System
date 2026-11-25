@@ -20,11 +20,38 @@ class FakeEmbedder:
         return np.ones((len(texts), 3), dtype=np.float32)
 
 
+class ZeroSimilarityEmbedder:
+    def embed(self, texts):
+        return np.zeros((len(texts), 3), dtype=np.float32)
+
+
 def test_skill_match_does_not_reuse_exact_candidate_skill():
     score = _score_skill_group(
         candidate_skills=["Python"],
         target_skills=["Python", "Python programming"],
         embedder=FakeEmbedder(),
+    )
+
+    assert score == 50.0
+
+
+def test_one_skill_satisfies_an_explicit_alternative_group():
+    score = _score_skill_group(
+        candidate_skills=["Vue"],
+        target_skills=["React", "Vue", "Angular"],
+        embedder=ZeroSimilarityEmbedder(),
+        alternative_groups=[["React", "Vue", "Angular"]],
+    )
+
+    assert score == 100.0
+
+
+def test_independent_skills_remain_separate_from_alternative_group():
+    score = _score_skill_group(
+        candidate_skills=["Vue"],
+        target_skills=["React", "Vue", "Angular", "Python"],
+        embedder=ZeroSimilarityEmbedder(),
+        alternative_groups=[["React", "Vue", "Angular"]],
     )
 
     assert score == 50.0
@@ -73,7 +100,51 @@ def test_education_recognizes_mca_and_computer_applications():
     assert score_education(resume, jd) == 100.0
 
 
-def test_projects_do_not_use_general_responsibilities_as_requirements():
+def test_education_fields_are_matched_and_in_progress_degrees_are_partial():
+    completed = ResumeData(
+        candidate_id="completed",
+        education=[
+            EducationEntry(
+                degree="Master of Science",
+                field_of_study="Computer Science",
+            )
+        ],
+    )
+    unrelated = ResumeData(
+        candidate_id="unrelated",
+        education=[
+            EducationEntry(
+                degree="Master of Business Administration",
+                field_of_study="Business Administration",
+            )
+        ],
+    )
+    in_progress = ResumeData(
+        candidate_id="in-progress",
+        education=[
+            EducationEntry(
+                degree="Master of Computer Applications",
+                field_of_study="Computer Science",
+                in_progress=True,
+            )
+        ],
+    )
+    jd = JobDescription(
+        required_education="Master's degree in Computer Science",
+    )
+
+    assert score_education(completed, jd) == 100.0
+    assert score_education(unrelated, jd) == 70.0
+    assert score_education(in_progress, jd) == 75.0
+    assert score_education(
+        in_progress,
+        JobDescription(
+            required_education="Completed Master's degree in Computer Science"
+        ),
+    ) == 0.0
+
+
+def test_projects_without_explicit_requirements_use_jd_responsibilities():
     resume = ResumeData(
         candidate_id="candidate-1",
         projects=[
@@ -89,11 +160,10 @@ def test_projects_do_not_use_general_responsibilities_as_requirements():
     )
 
     score = score_projects(resume, jd, FakeEmbedder())
-    assert 0.0 <= score < 100.0
-    assert score > 0.0
+    assert score == 100.0
 
 
-def test_projects_without_project_requirements_use_section_evidence_not_skill_overlap_only():
+def test_projects_without_explicit_requirements_use_jd_skills():
     resume = ResumeData(
         candidate_id="candidate-1",
         projects=[
@@ -109,7 +179,120 @@ def test_projects_without_project_requirements_use_section_evidence_not_skill_ov
     )
 
     score = score_projects(resume, jd, FakeEmbedder())
-    assert 0.0 < score < 100.0
+    assert score == 100.0
+
+
+def test_projects_without_explicit_requirements_score_relevance():
+    class ProjectRelevanceEmbedder:
+        def embed(self, texts):
+            vectors = []
+            for text in texts:
+                if text.startswith("Job requirements:"):
+                    vectors.append([1.0, 0.0])
+                elif "responsive user interface" in text.lower():
+                    vectors.append([0.8, 0.6])
+                else:
+                    vectors.append([0.0, 1.0])
+            return np.asarray(vectors, dtype=np.float32)
+
+    jd = JobDescription(
+        required_skills=["React"],
+        responsibilities=["Build responsive user interfaces"],
+    )
+    related = ResumeData(
+        candidate_id="related",
+        projects=[
+            ProjectEntry(
+                name="Responsive user interface",
+                description="Implemented page components.",
+            )
+        ],
+    )
+    unrelated = ResumeData(
+        candidate_id="unrelated",
+        projects=[
+            ProjectEntry(
+                name="Unrelated project",
+                description="Prepared a garden planting schedule.",
+            )
+        ],
+    )
+
+    related_score = score_projects(related, jd, ProjectRelevanceEmbedder())
+    unrelated_score = score_projects(unrelated, jd, ProjectRelevanceEmbedder())
+
+    assert related_score == 80.0
+    assert unrelated_score == 0.0
+
+
+def test_project_count_and_description_length_do_not_inflate_relevance():
+    class OrthogonalProjectEmbedder:
+        def embed(self, texts):
+            vectors = [
+                [1.0, 0.0]
+                if text.startswith("Job requirements:")
+                else [0.0, 1.0]
+                for text in texts
+            ]
+            return np.asarray(vectors, dtype=np.float32)
+
+    jd = JobDescription(responsibilities=["Build a secure API"])
+    short_resume = ResumeData(
+        candidate_id="short",
+        projects=[ProjectEntry(name="Unrelated", description="Gardening.")],
+    )
+    long_resume = ResumeData(
+        candidate_id="long",
+        projects=[
+            ProjectEntry(
+                name=f"Unrelated project {index}",
+                description="Gardening and landscape planning. " * 100,
+                technologies=["Python", "JavaScript"],
+            )
+            for index in range(5)
+        ],
+    )
+
+    assert score_projects(
+        short_resume,
+        jd,
+        OrthogonalProjectEmbedder(),
+    ) == 0.0
+    assert score_projects(
+        long_resume,
+        jd,
+        OrthogonalProjectEmbedder(),
+    ) == 0.0
+
+
+def test_projects_without_relevant_jd_criteria_use_conservative_zero():
+    resume = ResumeData(
+        candidate_id="candidate",
+        projects=[
+            ProjectEntry(
+                name="Large project",
+                description="Detailed project description. " * 100,
+                technologies=["Python", "React", "SQL"],
+            )
+        ],
+    )
+
+    assert score_projects(resume, JobDescription(), FakeEmbedder()) == 0.0
+
+
+def test_project_technology_tags_alone_do_not_score_fallback():
+    resume = ResumeData(
+        candidate_id="candidate",
+        projects=[
+            ProjectEntry(technologies=["Python", "React", "SQL"])
+        ],
+    )
+    jd = JobDescription(
+        required_skills=["Python", "React", "SQL"],
+        responsibilities=["Build a web application"],
+    )
+
+    assert score_projects(resume, jd, FakeEmbedder()) == 0.0
 
 
 def test_one_project_cannot_fulfil_multiple_project_requirements():

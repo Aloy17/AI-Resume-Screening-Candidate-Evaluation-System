@@ -40,6 +40,7 @@ class EducationEntry:
     field_of_study: str = ""
     institution: str = ""
     year: int | None = None
+    in_progress: bool = False
 
 
 @dataclass
@@ -76,6 +77,8 @@ class JobDescription:
     # Skills
     required_skills: list[str] = field(default_factory=list)
     preferred_skills: list[str] = field(default_factory=list)
+    required_skill_alternatives: list[list[str]] = field(default_factory=list)
+    preferred_skill_alternatives: list[list[str]] = field(default_factory=list)
 
     # Experience
     min_experience_years: float = 0.0

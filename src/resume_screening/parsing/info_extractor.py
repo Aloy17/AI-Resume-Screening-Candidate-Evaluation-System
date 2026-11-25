@@ -25,6 +25,7 @@ SECTION_HEADINGS = {
         "technical proficiencies",
         "technical proficiency",
         "technical expertise",
+        "technical & analytical skills",
         "core competencies",
         "core skills",
         "technical competencies",
@@ -66,6 +67,7 @@ SECTION_HEADINGS = {
         "academic projects",
         "personal projects",
         "project experience",
+        "analytical & strategic projects",
     },
     "responsibilities": {
         "responsibilities",
@@ -763,6 +765,31 @@ def _get_field_of_study(degree: str) -> str:
     return ""
 
 
+def _education_entry_in_progress(
+    lines: list[str],
+    entry_index: int,
+    stop_headings: set[str],
+) -> bool:
+    """Detect status markers attached to one education record."""
+
+    status_pattern = re.compile(
+        r"\b(pursuing|in progress|currently enrolled|"
+        r"currently studying|expected(?: graduation)?|present|current)\b",
+        re.IGNORECASE,
+    )
+
+    for index in range(entry_index, len(lines)):
+        if index > entry_index and (
+            DEGREE_PATTERN.search(lines[index])
+            or _normalize_heading(lines[index]) in stop_headings
+        ):
+            break
+        if status_pattern.search(lines[index]):
+            return True
+
+    return False
+
+
 def _extract_education(text: str) -> list[EducationEntry]:
     """Extract education records from degree-first and institution-first layouts."""
 
@@ -841,6 +868,11 @@ def _extract_education(text: str) -> list[EducationEntry]:
                 field_of_study=_get_field_of_study(degree),
                 institution=institution,
                 year=year,
+                in_progress=_education_entry_in_progress(
+                    lines,
+                    index,
+                    stop_headings,
+                ),
             )
         )
 
@@ -856,7 +888,18 @@ def _extract_projects(text: str) -> list[ProjectEntry]:
     """Extract projects even when PDF text has no blank lines between them."""
 
     entries = []
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    document_title_pattern = re.compile(
+        r"^(?:.{2,90}\s+[–—-]\s+resume|resume\s+[–—-]\s+.{2,90})$",
+        re.IGNORECASE,
+    )
+    page_number_pattern = re.compile(r"^page\s+\d+\s+of\s+\d+$", re.IGNORECASE)
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+        and not document_title_pattern.fullmatch(line.strip())
+        and not page_number_pattern.fullmatch(line.strip())
+    ]
     heading_pattern = re.compile(r"^.{2,90}\s+[–—]\s+.{2,90}$")
     pipe_heading_pattern = re.compile(r"^.{2,90}\s*\|\s*.{2,90}$")
     labeled_heading_pattern = re.compile(
@@ -1179,7 +1222,7 @@ def _extract_jd_bullets(text: str) -> list[str]:
 def _extract_required_preferred_skills(
     skills_text: str,
     preferred_text: str,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[list[str]], list[list[str]]]:
     """Separate explicitly preferred skills from required skills."""
 
     preferred_markers = (
@@ -1193,23 +1236,134 @@ def _extract_required_preferred_skills(
 
     required = set()
     preferred = set()
+    required_alternatives = set()
+    preferred_alternatives = set()
 
     for bullet in _extract_jd_bullets(skills_text):
         detected = set(_extract_skills(bullet))
+        alternatives = _extract_alternative_skill_groups(bullet)
 
         if any(
             marker in bullet.lower()
             for marker in preferred_markers
         ):
             preferred.update(detected)
+            preferred_alternatives.update(alternatives)
         else:
             required.update(detected)
+            required_alternatives.update(alternatives)
 
     preferred.update(
         _extract_skills(preferred_text)
     )
 
-    return sorted(required), sorted(preferred)
+    for bullet in (
+        _extract_jd_bullets(preferred_text)
+        or ([preferred_text] if preferred_text.strip() else [])
+    ):
+        preferred_alternatives.update(
+            _extract_alternative_skill_groups(bullet)
+        )
+
+    return (
+        sorted(required),
+        sorted(preferred),
+        [list(group) for group in sorted(required_alternatives)],
+        [list(group) for group in sorted(preferred_alternatives)],
+    )
+
+
+def _extract_alternative_skill_groups(text: str) -> set[tuple[str, ...]]:
+    """Find explicit OR-linked skills without grouping unrelated terms."""
+
+    mentions = []
+    for skill, aliases in SKILL_KEYWORDS.items():
+        for alias in aliases:
+            pattern = (
+                r"(?<!\w)"
+                + re.escape(alias)
+                + r"(?!\w)"
+            )
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                if (
+                    skill == "react"
+                    and re.match(r"\s+native\b", text[match.end():], re.IGNORECASE)
+                ):
+                    continue
+                mentions.append((match.start(), match.end(), skill))
+
+    mentions.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2]))
+    non_overlapping = []
+    for mention in mentions:
+        if non_overlapping and mention[0] < non_overlapping[-1][1]:
+            continue
+        non_overlapping.append(mention)
+
+    groups = []
+    for alternative in re.finditer(r"\bor\b", text, re.IGNORECASE):
+        left_index = next(
+            (
+                index
+                for index in range(len(non_overlapping) - 1, -1, -1)
+                if non_overlapping[index][1] <= alternative.start()
+            ),
+            None,
+        )
+        right_index = next(
+            (
+                index
+                for index, mention in enumerate(non_overlapping)
+                if mention[0] >= alternative.end()
+            ),
+            None,
+        )
+        if left_index is None or right_index is None:
+            continue
+
+        left = non_overlapping[left_index]
+        right = non_overlapping[right_index]
+        connector = text[left[1]:right[0]]
+        if not re.fullmatch(
+            r"[\s,/()]*or[\s,/()]*",
+            connector,
+            re.IGNORECASE,
+        ):
+            continue
+
+        first_index = left_index
+        while first_index > 0:
+            previous = non_overlapping[first_index - 1]
+            current = non_overlapping[first_index]
+            separator = text[previous[1]:current[0]]
+            if not re.fullmatch(r"[\s,/]+", separator):
+                break
+            if first_index > 1:
+                earlier = non_overlapping[first_index - 2]
+                earlier_connector = text[earlier[1]:previous[0]]
+                if re.search(r"\bor\b", earlier_connector, re.IGNORECASE):
+                    break
+            first_index -= 1
+
+        group = tuple(dict.fromkeys(
+            mention[2]
+            for mention in non_overlapping[first_index:right_index + 1]
+        ))
+        if len(group) > 1:
+            groups.append(group)
+
+    merged_groups = []
+    for group in groups:
+        overlapping = [existing for existing in merged_groups if set(existing) & set(group)]
+        if overlapping:
+            combined = set(group)
+            for existing in overlapping:
+                combined.update(existing)
+                merged_groups.remove(existing)
+            merged_groups.append(tuple(sorted(combined)))
+        else:
+            merged_groups.append(tuple(sorted(group)))
+
+    return set(merged_groups)
 
 
 def _extract_experience_range(
@@ -1243,7 +1397,7 @@ def _extract_experience_range(
 
 
 def _extract_jd_education(text: str) -> str:
-    """Extract the degree requirement from education text."""
+    """Preserve the first complete degree qualification, including its field."""
 
     degree_patterns = [
         (r"\bbachelor(?:'|’)?s?\b", "BACHELOR"),
@@ -1259,9 +1413,16 @@ def _extract_jd_education(text: str) -> str:
         (r"\bdiploma\b", "DIPLOMA"),
     ]
 
-    for pattern, degree in degree_patterns:
-        if re.search(pattern, text, re.IGNORECASE):
-            return degree
+    candidates = _extract_jd_bullets(text)
+    if not candidates:
+        candidates = [text.strip()] if text.strip() else []
+
+    for candidate in candidates:
+        if any(
+            re.search(pattern, candidate, re.IGNORECASE)
+            for pattern, _ in degree_patterns
+        ):
+            return candidate
 
     return ""
 
@@ -1417,7 +1578,12 @@ def parse_job_description(text: str) -> JobDescription:
 
     preferred_text = sections.get("preferred", "")
 
-    required_skills, preferred_skills = (
+    (
+        required_skills,
+        preferred_skills,
+        required_skill_alternatives,
+        preferred_skill_alternatives,
+    ) = (
         _extract_required_preferred_skills(
             sections.get("skills", ""),
             preferred_text,
@@ -1545,6 +1711,8 @@ def parse_job_description(text: str) -> JobDescription:
         title=title,
         required_skills=required_skills,
         preferred_skills=preferred_skills,
+        required_skill_alternatives=required_skill_alternatives,
+        preferred_skill_alternatives=preferred_skill_alternatives,
         min_experience_years=min_experience,
         max_experience_years=max_experience,
         required_education=required_education,

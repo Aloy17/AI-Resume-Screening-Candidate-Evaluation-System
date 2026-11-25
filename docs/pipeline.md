@@ -60,7 +60,7 @@ The cache stores embeddings only. PDF extraction and parsing still happen on eac
 
 ## 6. Category matching
 
-Every candidate receives four category scores from 0 to 100.
+Each category is either applicable with a score from 0 to 100 or marked N/A.
 
 ### Skills
 
@@ -68,33 +68,35 @@ Every candidate receives four category scores from 0 to 100.
 - Remaining skills are compared by cosine similarity.
 - Semantic matches must meet a threshold of 0.75.
 - Matching is one-to-one: a candidate skill cannot satisfy multiple target skills within the same group.
+- Explicit alternatives such as “React, Vue, or Angular” count as one requirement; other listed skills remain independent requirements.
 - When both required and preferred skills exist, their scores are combined 80:20. If only one group exists, that group supplies the score.
-- If the job description contains no required or preferred skills, the score is 0.
+- A missing Skills section scores 0 when the JD has skills requirements. If the JD has no skills requirements, an existing Skills section is scored by its count of unique extracted skills, capped at ten.
 
 ### Experience
 
-The years component compares the candidate's total estimated experience with the JD's minimum requirement.
+The years component compares the candidate's total dated experience with the JD's experience range. Overlapping dated periods are counted once; undated entries do not add years.
 
 - If the candidate is below the minimum, the score is proportional to candidate years divided by required minimum years.
 - Meeting or exceeding the minimum produces 100; exceeding the maximum is not penalized.
-- If both minimum and maximum are absent, the years score is 100.
-- A minimum of zero does not impose a positive experience threshold.
-
-When both candidate responsibilities and JD responsibilities are available, they are semantically compared with one-to-one assignment. The years and responsibility components are combined 70:30. If either side has no responsibility evidence, only the years score is used.
+- When a positive years requirement and responsibility evidence are both present, years and responsibility similarity are combined 70:30. If either side has no responsibility evidence, only the years score is used.
+- If the JD has responsibilities but no positive years requirement, the experience score uses responsibility similarity alone.
+- If the JD has no experience criteria, an existing Experience section uses a section-based score from entry count, responsibility count, and dated duration.
+- A missing Experience section scores 0 when the JD has experience criteria; when neither side has experience evidence or criteria, Experience is N/A.
 
 ### Education
 
-Education is compared using rule-based degree levels and field-of-study aliases. Required and preferred qualification scores are combined 80:20 when both are present. If only one is present, only that requirement is scored. If the JD specifies neither, the education score is 100.
+Education is applicable only when the JD specifies an education requirement. The parser preserves the qualification text so degree level and field of study can be compared using the configured degree levels and field aliases. In-progress degrees receive partial credit unless the JD explicitly requires a completed qualification, in which case they do not satisfy that degree requirement. Required and preferred qualification scores are combined 80:20 when both are present. If the resume has no Education section while education is required, the score is 0; if the JD has no education requirement, Education is N/A.
 
 ### Projects
 
-Project descriptions are compared only with explicit JD project requirements—not the general responsibilities section.
+Projects are always applicable. A resume with no parsed Projects section receives 0.
 
-- Description similarity uses cosine similarity and a threshold of 0.65.
+- With explicit project requirements, description similarity uses cosine similarity and a threshold of 0.65.
 - Each project and each project requirement can be used in at most one description match.
 - Technology overlap is an exact normalized comparison between detected project technologies and the JD's required and preferred skills.
 - Description and technology scores are combined 70:30 when both are available. If only one component has usable evidence, the available component is used.
-- A resume with no parsed projects receives 0.
+- Without explicit project requirements, project descriptions are compared semantically with a combined context made from the JD's skills and responsibilities. Project count, description length, and technology count do not independently add points.
+- If the JD has no usable skills or responsibilities to establish project relevance, the applicable Projects score is 0.
 
 ## 7. Weighted final score
 
@@ -120,7 +122,11 @@ The four category scores are combined using a weight profile from `config/weight
 
 A profile is selected by normalizing the job-description filename stem and matching it to a profile key. If no profile matches, default weights are used.
 
-The final score is the weighted sum of skills, experience, education and project scores.
+N/A categories are excluded and the remaining configured weights are normalized proportionally. Applicable zero scores retain their weights:
+
+`Final score = sum(category score × category weight) / sum(applicable category weights)`
+
+If no category is applicable, the final score is unavailable rather than fabricated.
 
 ## 8. Ranking
 

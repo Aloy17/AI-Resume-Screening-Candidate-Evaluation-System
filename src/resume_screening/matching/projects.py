@@ -130,35 +130,33 @@ def score_projects(
     ]
 
     if not jd.project_requirements:
-        project_count_score = min(len(project_texts) / 3.0, 1.0) * 50.0
-
-        description_quality_score = 0.0
-        if project_texts:
-            average_description_length = sum(
-                len(text) for text in project_texts
-            ) / len(project_texts)
-            description_quality_score = min(
-                average_description_length / 180.0,
-                1.0,
-            ) * 30.0
-
-        explicit_technology_count = sum(
-            len({
-                _normalize(technology)
-                for technology in project.technologies
-                if technology.strip()
-            })
+        relevance_texts = [
+            " ".join(
+                filter(None, [project.name, project.description])
+            ).strip()
             for project in resume.projects
-        )
-        technology_evidence_score = min(
-            explicit_technology_count / 5.0,
-            1.0,
-        ) * 20.0
+        ]
+        relevance_texts = [text for text in relevance_texts if text]
 
+        criteria = []
+        jd_skills = sorted(set(jd.required_skills + jd.preferred_skills))
+        if jd_skills:
+            criteria.append("Skills: " + ", ".join(jd_skills))
+        criteria.extend(
+            responsibility.strip()
+            for responsibility in jd.responsibilities
+            if responsibility.strip()
+        )
+        if not criteria:
+            return 0.0
+
+        jd_context = "Job requirements: " + " ".join(criteria)
         return round(
-            project_count_score
-            + description_quality_score
-            + technology_evidence_score,
+            _score_descriptions(
+                relevance_texts,
+                [jd_context],
+                embedder,
+            ),
             2,
         )
 
